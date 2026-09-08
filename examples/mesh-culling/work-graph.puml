@@ -1,0 +1,84 @@
+@startuml WorkGraphDependencies
+scale 2
+hide empty description
+skinparam DefaultFontColor #1A1A1A
+skinparam ArrowColor #555555
+skinparam ArrowFontColor #333333
+skinparam NoteBackgroundColor #FBFBFB
+skinparam NoteBorderColor #999999
+skinparam NoteBorderThickness 1
+skinparam NoteFontSize 9
+skinparam NoteFontColor #1A1A1A
+skinparam PackageBorderColor #555555
+skinparam PackageFontColor #1A1A1A
+skinparam LegendBorderColor #555555
+skinparam LegendFontColor #1A1A1A
+skinparam rectangle {
+    RoundCorner 12
+    BorderColor #555555
+    BackgroundColor<<broadcasting>> #CFE8FF
+    BackgroundColor<<coalescing>> #FFF3B0
+    BackgroundColor<<thread>> #D9F2D9
+    BackgroundColor<<mesh>> #F5CFEA
+    BackgroundColor<<unknown>> #EEEEEE
+    BackgroundColor<<external>> #F2F2F2
+    BorderColor<<entry>> #C0392B
+    BorderThickness<<entry>> 3
+    BorderStyle<<external>> dashed
+    BorderStyle<<multi>> dashed
+}
+skinparam database {
+    BackgroundColor #F5EBD8
+    BorderColor #9C7A3C
+}
+
+package "nodes-compute" {
+    database "<b><color:#8A6D3B>objects</color></b>\n\n<i><size:9>StructuredBuffer · t0</size></i>\n<i><size:9><color:#8A8A8A><<ObjectData>></color></size></i>" as global_objects_nodes_compute
+    rectangle "<color:#1A5276>CullNode</color>\n\n<i><size:10>Depth: 1</size></i>\n<i><size:10>Grid: (<color:#8A8A8A>1</color>,<color:#8A8A8A>1</color>,<color:#8A8A8A>1</color>)</size></i>\n<i><size:10>Threads: (CULL_THREADS (64), <color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>)</size></i>\n\n<i><size:10>Globals used:</size></i>\n<i><size:10>  <color:#8A6D3B>objects</color> (t0) <color:#8A8A8A><<ObjectData>></color></size></i>\n<i><size:10>Record in:</size></i>\n<i><size:10>  <color:#8E44AD><<DispatchRecord>></color></size></i>\n<i><size:10>Record out:</size></i>\n<i><size:10>  <color:#8E44AD><<MeshInputRecord>></color> (64)</size></i>\n\n<size:9>Reads the object buffer (no actual culling logic here - this is a</size>\n<size:9>diagram skeleton) and emits one mesh-launch record per thread group for</size>\n<size:9>RenderMeshNode to consume.</size>" as CullNode <<broadcasting>>
+    rectangle "<color:#1A5276>EntryNode</color>\n\n<i><size:10>Depth: 0</size></i>\n<i><size:10>Grid: (<color:#8A8A8A>1</color>,<color:#8A8A8A>1</color>,<color:#8A8A8A>1</color>)</size></i>\n<i><size:10>Threads: (<color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>)</size></i>\n\n<i><size:10>Record out:</size></i>\n<i><size:10>  <color:#8E44AD><<DispatchRecord>></color> (1)</size></i>\n\n<size:9>Graph entry point: hands a single dispatch record to CullNode.</size>" as EntryNode <<broadcasting>> <<entry>>
+}
+
+package "nodes-mesh" {
+    rectangle "<color:#1A5276>RenderMeshNode</color>\n\n<i><size:10>Depth: 2</size></i>\n<i><size:10>Grid: ≤(64, <color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>) dynamic</size></i>\n<i><size:10>Threads: (RMN_THREADS (32), <color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>)</size></i>\n\n<i><size:10>Record in:</size></i>\n<i><size:10>  <color:#8E44AD><<MeshInputRecord>></color></size></i>\n\n<size:9>Mesh-launch node: rasterizes up to 64 triangles per thread group.</size>" as RenderMeshNode <<mesh>> <<multi>>
+}
+
+CullNode --> RenderMeshNode
+note on link
+  <i><color:#8E44AD><<MeshInputRecord>></color></i> (64)
+  <size:8>meshOutput</size>
+end note
+EntryNode --> CullNode
+note on link
+  <i><color:#8E44AD><<DispatchRecord>></color></i> (1)
+  <size:8>dispatchOutput</size>
+end note
+global_objects_nodes_compute -[dashed]-> CullNode
+
+legend right
+  Global resources:
+  |  Identifier  |  Slot  |  Kind  |  Value type  |  Used?  |
+  |  <b><color:#8A6D3B>objects</color></b>  |  t0  |  StructuredBuffer  |  ObjectData  |  ✓  |
+  
+  Register slot prefixes:
+  t<NR> := SRV (shader resource view) - read-only buffer/texture
+  u<NR> := UAV (unordered access view) - read-write buffer/texture
+  b<NR> := CBV (constant buffer view) - small constant-buffer data
+  s<NR> := sampler state
+  
+  |  Color  |  Launch mode  |
+  |  <#CFE8FF>  |  broadcasting  |
+  |  <#FFF3B0>  |  coalescing  |
+  |  <#D9F2D9>  |  thread  |
+  |  <#F5CFEA>  |  mesh  |
+  |  <#F2F2F2>  |  external / unresolved reference  |
+  |  <#F5EBD8>  |  global resource (StructuredBuffer/ConstantBuffer/... via register())  |
+  Red border = graph entry point (NodeIsProgramEntry)
+  Dashed border = grid can expand to >1 thread group per invocation
+  (NodeMaxDispatchGrid, or NodeDispatchGrid != (1,1,1)); solid border = always
+  exactly one group (NodeDispatchGrid(1,1,1), thread launch, or coalescing)
+  A dashed edge from a global resource box into a node means that node reads it -
+  a global is effectively an input too, just dashed to stay visually distinct from
+  a produced-record edge; each global is replicated once per consuming node-group
+  to keep edges short (see the global resource table above for the full, ungrouped list)
+endlegend
+@enduml

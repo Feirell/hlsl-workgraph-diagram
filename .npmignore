@@ -1,0 +1,19 @@
+# Not needed to install/run the published CLI - kept in the repo, not the
+# npm package.
+examples/
+generate-workgraph-diagram.md
+
+# VCS / editor / OS cruft
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
+
+# Local packaging/test artifacts
+node_modules/
+npm-debug.log*
+*.tgz

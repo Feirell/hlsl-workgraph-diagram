@@ -1,0 +1,35 @@
+{
+  "name": "hlsl-workgraph-diagram",
+  "version": "1.0.0",
+  "description": "Reverse-engineer a Direct3D 12 Work Graph's topology from HLSL source and render it as a PlantUML diagram (plus PNG/SVG).",
+  "keywords": [
+    "directx12",
+    "d3d12",
+    "work-graphs",
+    "mesh-shaders",
+    "hlsl",
+    "plantuml",
+    "gpu",
+    "graphviz",
+    "diagram"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "Florian Voelker"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Feirell/hlsl-workgraph-diagram.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Feirell/hlsl-workgraph-diagram/issues"
+  },
+  "homepage": "https://github.com/Feirell/hlsl-workgraph-diagram#readme",
+  
+  "bin": {
+    "hlsl-workgraph-diagram": "generate-workgraph-diagram.js"
+  },
+  "engines": {
+    "node": ">=14"
+  }
+}

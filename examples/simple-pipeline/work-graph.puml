@@ -1,0 +1,60 @@
+@startuml WorkGraphDependencies
+scale 2
+hide empty description
+skinparam DefaultFontColor #1A1A1A
+skinparam ArrowColor #555555
+skinparam ArrowFontColor #333333
+skinparam NoteBackgroundColor #FBFBFB
+skinparam NoteBorderColor #999999
+skinparam NoteBorderThickness 1
+skinparam NoteFontSize 9
+skinparam NoteFontColor #1A1A1A
+skinparam PackageBorderColor #555555
+skinparam PackageFontColor #1A1A1A
+skinparam LegendBorderColor #555555
+skinparam LegendFontColor #1A1A1A
+skinparam rectangle {
+    RoundCorner 12
+    BorderColor #555555
+    BackgroundColor<<broadcasting>> #CFE8FF
+    BackgroundColor<<coalescing>> #FFF3B0
+    BackgroundColor<<thread>> #D9F2D9
+    BackgroundColor<<mesh>> #F5CFEA
+    BackgroundColor<<unknown>> #EEEEEE
+    BackgroundColor<<external>> #F2F2F2
+    BorderColor<<entry>> #C0392B
+    BorderThickness<<entry>> 3
+    BorderStyle<<external>> dashed
+    BorderStyle<<multi>> dashed
+}
+
+package "nodes-compute" {
+    rectangle "<color:#1A5276>CollectNode</color>\n\n<i><size:10>Depth: 2</size></i>\n<i><size:10>Grid: <color:#8A8A8A>1</color> group (coalesced)</size></i>\n<i><size:10>Threads: (COLLECT_THREADS (32), <color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>)</size></i>\n\n<i><size:10>Record in:</size></i>\n<i><size:10>  <color:#8E44AD><<ResultRecord>></color> (64)</size></i>\n\n<size:9>Gathers up to 64 ResultRecords per invocation. Terminal node - no output.</size>" as CollectNode <<coalescing>>
+    rectangle "<color:#1A5276>EntryNode</color>\n\n<i><size:10>Depth: 0</size></i>\n<i><size:10>Grid: (<color:#8A8A8A>1</color>,<color:#8A8A8A>1</color>,<color:#8A8A8A>1</color>)</size></i>\n<i><size:10>Threads: (<color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>)</size></i>\n\n<i><size:10>Record out:</size></i>\n<i><size:10>  <color:#8E44AD><<WorkItemRecord>></color> (64)</size></i>\n\n<size:9>Graph entry point: a fixed 1x1x1 broadcasting dispatch that fans out</size>\n<size:9>up to 64 work items to GenerateNode.</size>" as EntryNode <<broadcasting>> <<entry>>
+    rectangle "<color:#1A5276>GenerateNode</color>\n\n<i><size:10>Depth: 1</size></i>\n<i><size:10>Grid: <color:#8A8A8A>1</color> thread/record</size></i>\n<i><size:10>Threads: n/a</size></i>\n\n<i><size:10>Record in:</size></i>\n<i><size:10>  <color:#8E44AD><<WorkItemRecord>></color></size></i>\n<i><size:10>Record out:</size></i>\n<i><size:10>  <color:#8E44AD><<ResultRecord>></color> (1)</size></i>\n\n<size:9>One thread per WorkItemRecord; produces a single ResultRecord for</size>\n<size:9>CollectNode to gather.</size>" as GenerateNode <<thread>>
+}
+
+EntryNode --> GenerateNode
+note on link
+  <i><color:#8E44AD><<WorkItemRecord>></color></i> (64)
+  <size:8>workItemOutput</size>
+end note
+GenerateNode --> CollectNode
+note on link
+  <i><color:#8E44AD><<ResultRecord>></color></i> (1)
+  <size:8>resultOutput</size>
+end note
+
+legend right
+  |  Color  |  Launch mode  |
+  |  <#CFE8FF>  |  broadcasting  |
+  |  <#FFF3B0>  |  coalescing  |
+  |  <#D9F2D9>  |  thread  |
+  |  <#F5CFEA>  |  mesh  |
+  |  <#F2F2F2>  |  external / unresolved reference  |
+  Red border = graph entry point (NodeIsProgramEntry)
+  Dashed border = grid can expand to >1 thread group per invocation
+  (NodeMaxDispatchGrid, or NodeDispatchGrid != (1,1,1)); solid border = always
+  exactly one group (NodeDispatchGrid(1,1,1), thread launch, or coalescing)
+endlegend
+@enduml
