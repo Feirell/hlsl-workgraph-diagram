@@ -1,0 +1,4 @@
+# Fetched by tools/fetch-dxc.sh — large binaries, don't commit.
+tools/dxc/
+# Output of tools/run-dxc.sh.
+out/

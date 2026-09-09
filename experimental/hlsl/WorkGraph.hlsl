@@ -1,0 +1,28 @@
+// ---------------------------------------------------------------------------
+// Experimental v2 fixture — not part of the published tool.
+//
+// This is the single compile unit handed to dxc (-T lib_6_8): a minimal but
+// valid work graph, EntryNode (broadcasting) -> GenerateNode (thread) ->
+// CollectNode (coalescing), with an optional RenderMeshNode (mesh) pulled in
+// only when ENABLE_MESH_PATH is defined.
+//
+// ENABLE_MESH_PATH is off by default specifically so that:
+//   - a default compile (`run-dxc.sh compile`) never touches the mesh node,
+//     even though the string NodeLaunch("mesh") is present on disk under
+//     nodes-mesh/ — the point being to see whether dxc's output (compiled
+//     exports / disassembly / reflection) omits it the way a real
+//     preprocessor+DCE pass should, where the current regex scanner can't.
+//   - passing `-D ENABLE_MESH_PATH=1` (see run-dxc.sh) flips it on and pulls
+//     RenderMeshNode into the graph, which is also the case that needs the
+//     mesh-nodes-preview dxc build fetched by fetch-dxc.sh.
+//
+// See experimental/README.md for how these fixtures are meant to be used.
+// ---------------------------------------------------------------------------
+
+#include "nodes-compute/EntryNode.hlsl"
+#include "nodes-compute/GenerateNode.hlsl"
+#include "nodes-compute/CollectNode.hlsl"
+
+#if defined(ENABLE_MESH_PATH) && ENABLE_MESH_PATH
+#include "nodes-mesh/RenderMeshNode.hlsl"
+#endif
