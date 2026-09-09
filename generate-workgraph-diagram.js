@@ -8,5 +8,16 @@
 // ---------------------------------------------------------------------------
 'use strict';
 
+// Thin bin entry - all behavior lives in src/cli.js, which dispatches to
+// the five subcommand modules under src/. See "hlsl-workgraph-diagram
+// --help" (or README.md) for the current command list; this file used to
+// run the old single all-in-one pipeline directly, before the v2 restructure
+// split it into setup-dxil / parse-source / parse-dxil / build-puml /
+// puml-render.
 
-require('./src/index.js');
+const { main } = require('./src/cli.js');
+
+main(process.argv.slice(2)).catch((err) => {
+    console.error(err.stack || err.message || err);
+    process.exit(1);
+});

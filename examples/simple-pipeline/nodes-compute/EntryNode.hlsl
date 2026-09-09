@@ -4,7 +4,8 @@
 // supervision - it was generated as prompted, code was not adjusted or
 // written. Review before relying on it.
 // ---------------------------------------------------------------------------
-#pragma once
+#ifndef SIMPLE_PIPELINE_NODES_COMPUTE_ENTRYNODE_HLSL
+#define SIMPLE_PIPELINE_NODES_COMPUTE_ENTRYNODE_HLSL
 #include "../structs/Records.hlsl"
 
 // Graph entry point: a fixed 1x1x1 broadcasting dispatch that fans out
@@ -25,3 +26,5 @@ void EntryNode(
     ThreadNodeOutputRecords<WorkItemRecord> items = workItemOutput.GetThreadNodeOutputRecords(64);
     items.OutputComplete();
 }
+
+#endif

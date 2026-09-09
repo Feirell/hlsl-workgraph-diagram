@@ -4,7 +4,8 @@
 // supervision - it was generated as prompted, code was not adjusted or
 // written. Review before relying on it.
 // ---------------------------------------------------------------------------
-#pragma once
+#ifndef MESH_CULLING_NODES_MESH_RENDERMESHNODE_HLSL
+#define MESH_CULLING_NODES_MESH_RENDERMESHNODE_HLSL
 #include "../structs/Records.hlsl"
 #include "../structs/VertexTypes.hlsl"
 
@@ -26,3 +27,5 @@ void RenderMeshNode(
 )
 {
 }
+
+#endif

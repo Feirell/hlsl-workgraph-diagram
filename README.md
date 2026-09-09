@@ -6,27 +6,42 @@
 # hlsl-workgraph-diagram
 
 Reverse-engineer a Direct3D 12 [Work Graph](https://microsoft.github.io/DirectX-Specs/d3d/WorkGraphs.html)'s
-topology directly from its HLSL source, and render it as a
-[PlantUML](https://plantuml.com/) diagram (plus PNG/SVG).
+topology from HLSL, and render it as a [PlantUML](https://plantuml.com/) diagram (plus PNG/SVG) - via
+either of two independent parsers feeding one shared renderer.
 
-Point it at a directory tree containing `nodes-*` folders (e.g. `nodes-compute/`, `nodes-mesh/`), and it
-will:
+No dependencies. Node.js built-ins only (`fs`, `path`, `zlib`, `http`, `https`, `child_process`).
 
-- find every `[Shader("node")]` function and parse its `NodeLaunch` mode, dispatch grid, thread count,
-  input/output records, and `[NodeID(...)]` overrides — without a real HLSL parser, just enough
-  regex/paren-balance scanning to handle real-world shader trees
-- resolve `#define`/`static const` constants referenced in those attributes (e.g. `NodeDispatchGrid(1, 32 *
-  CUBOID_FACES, 1)`) so record counts and dispatch grids show their actual numeric values, not just the
-  symbol name
-- compute each node's longest-path depth from the graph's entry node(s), as a sanity check against
-  Work Graphs' 32-depth limit
-- detect which nodes read which global GPU resources (`register(tN)`/`register(uN)`/... bindings) by
-  scanning function bodies, and list them per node
-- render everything as a themed, colour-coded PlantUML diagram — grouped by source subdirectory, coloured by
-  launch mode, with edge notes for record types/counts — and optionally fetch a rendered PNG/SVG from a
-  PlantUML server
+## Two parsing paths, one pipeline
 
-No dependencies. Node.js built-ins only (`fs`, `path`, `zlib`, `http`, `https`).
+The tool is five small commands, each one pipeline stage - not one monolithic script:
+
+```
+                    ┌─────────────┐
+   HLSL source ───▶ │ parse-source │ ─┐
+   (regex scan)     └─────────────┘  │
+                                      ├─▶  IR JSON  ─▶  build-puml  ─▶  .puml  ─▶  puml-render  ─▶  .png/.svg
+                    ┌─────────────┐  │
+   HLSL source ───▶ │  parse-dxil  │ ─┘
+   (dxc compile)    └─────────────┘
+                          ▲
+                          │
+                    ┌─────────────┐
+                    │  setup-dxil  │   (fetches dxc, once)
+                    └─────────────┘
+```
+
+- **`parse-source`** - the original approach: a regex/paren-balance scan over the raw HLSL, no real
+  preprocessor. Works on any directory tree, needs nothing installed.
+- **`parse-dxil`** - compiles your HLSL with `dxc` (the real DirectX Shader Compiler) and reads the work
+  graph's structure back out of the compiled DXIL metadata and debug info instead of scanning text. Gets
+  `#define`/`#if`/dead-code-elimination correct *for free*, because it's a real compiler - at the cost of
+  needing `dxc` (`setup-dxil` fetches one for you) and a single `.hlsl` file that `#include`s everything the
+  graph needs, the same as you'd hand `dxc` directly.
+
+Both write the exact same JSON shape (the "IR" - see [`docs/ir-format.md`](docs/ir-format.md)), which is
+all `build-puml` ever reads - it has no idea which parser produced it. Pick whichever parser fits your
+project; mix and match freely, or run both and compare (see `docs/ir-format.md`'s "Known differences"
+section for the handful of real, narrow gaps between them).
 
 ## Install
 
@@ -39,86 +54,149 @@ yarn global add hlsl-workgraph-diagram
 Or run it without installing:
 
 ```sh
-npx hlsl-workgraph-diagram [rootDir] [outFile] [options]
+npx hlsl-workgraph-diagram <command> [args...]
 # or
-yarn dlx hlsl-workgraph-diagram [rootDir] [outFile] [options]
+yarn dlx hlsl-workgraph-diagram <command> [args...]
 ```
 
 ## Usage
 
 ```sh
-node generate-workgraph-diagram.js [rootDir] [outFile] [options]
+hlsl-workgraph-diagram <command> [args...]
 ```
 
-- `rootDir` — directory to recursively search for `nodes-*` folders. Default: current working directory.
-  Not relative to the script — relative to wherever you run it from.
-- `outFile` — path to write the `.puml` file to, relative (resolved against the current working directory)
-  or absolute. `.puml` is appended automatically if not already present. Default: `work-graph.puml` in the
-  current working directory. When rendering is enabled (the default), the `.png`/`.svg` are written next to
-  it, named by swapping the `.puml` extension. Any subdirectory in the path is created automatically if it
-  doesn't exist yet.
+Run `hlsl-workgraph-diagram --help` for the command list, or `hlsl-workgraph-diagram <command> --help` for
+a command's own arguments/options.
+
+### The regex-scan path
 
 ```sh
-# Diagram the current directory's shaders, write ./work-graph.puml/.png/.svg
-npx hlsl-workgraph-diagram
-yarn dlx hlsl-workgraph-diagram
+# HLSL source -> IR JSON
+npx hlsl-workgraph-diagram parse-source path/to/shaders work-graph.ir.json
 
-# Point at a specific shader tree and output path (subdirectories are
-# created automatically; the .puml extension is added if you leave it off)
-npx hlsl-workgraph-diagram path/to/shaders diagrams/graph
-yarn dlx hlsl-workgraph-diagram path/to/shaders diagrams/graph
+# IR JSON -> .puml
+npx hlsl-workgraph-diagram build-puml work-graph.ir.json work-graph.puml
 
-# Higher-resolution PNG (3x here; default is already 2x)
-npx hlsl-workgraph-diagram . out.puml --scale 3
-yarn dlx hlsl-workgraph-diagram . out.puml --scale 3
-
-# Skip PlantUML rendering, just emit the .puml source
-npx hlsl-workgraph-diagram . out.puml --no-render
-yarn dlx hlsl-workgraph-diagram . out.puml --no-render
-
-# Dark theme, compact node metadata, no PlantUML-server network call
-npx hlsl-workgraph-diagram . out.puml --dark --short-meta --no-render
-yarn dlx hlsl-workgraph-diagram . out.puml --dark --short-meta --no-render
+# .puml -> .png + .svg
+npx hlsl-workgraph-diagram puml-render work-graph.puml
 ```
+
+`parse-source [rootSourceDir] [outJsonFile]` recursively searches `rootSourceDir` for `nodes-*`
+directories (e.g. `nodes-compute/`, `nodes-mesh/`) and scans every `[Shader("node")]` function inside.
+`rootSourceDir` defaults to the current directory; `outJsonFile` defaults to `work-graph.ir.json`.
+
+### The dxc-compile path
+
+```sh
+# fetch a dxc build once (skip if you already have one - see --dxc/--dxc-version below)
+npx hlsl-workgraph-diagram setup-dxil
+
+# HLSL source -> IR JSON (entryHLSLFile must #include everything the graph needs)
+npx hlsl-workgraph-diagram parse-dxil path/to/shaders/WorkGraph.hlsl work-graph.ir.json
+
+# same build-puml / puml-render steps as above
+npx hlsl-workgraph-diagram build-puml work-graph.ir.json work-graph.puml
+npx hlsl-workgraph-diagram puml-render work-graph.puml
+```
+
+`setup-dxil [mesh | stable | experimental | <version> | list]` downloads and caches a `dxc` build from
+nuget.org, keyed by exact version, at a standard location `parse-dxil` auto-discovers. `dxc.exe` is a
+native Windows binary with no Linux build at any version published so far - `parse-dxil` runs it directly
+on Windows, and best-effort through `wine`/`wine64` elsewhere if present. See Options below for what each
+argument resolves to, and `hlsl-workgraph-diagram setup-dxil list` to see every version NuGet has ever
+published (including which ones are already cached).
+
+`parse-dxil [entryHLSLFile] [outJsonFile] [options]` compiles `entryHLSLFile` (default `WorkGraph.hlsl` in
+the current directory) and writes the IR.
+
+### build-puml and puml-render
+
+`build-puml [inJsonFile] [outPUml] [options]` reads the IR (from either parser) and renders it as a
+PlantUML diagram. `.puml` is appended to `outPUml` automatically if not already present. This is where
+every display/layout choice lives - see Options below.
+
+`puml-render [pUmlFile] [options]` renders a `.puml` file to `.png` + `.svg` next to it, via a PlantUML
+server (public by default). The only command that ever makes a network call - `build-puml` always writes a
+valid `.puml` regardless of whether you run this.
 
 ### Options
 
+Grouped by the command each belongs to. Run `<command> --help` for the exact, current list per command -
+flags are added faster than docs sometimes keep up.
+
+**`setup-dxil`** (one positional argument, not a flag):
+
+| Argument | Description |
+| --- | --- |
+| `stable` | Latest published version with no prerelease tag. Default when no argument is given. |
+| `mesh` | The one `dxc` build currently known able to compile a `[NodeLaunch("mesh")]` node - a pinned, known-good version (see `docs/ir-format.md`), not "whatever's newest". |
+| `experimental` | Latest published version *with* a prerelease tag - whatever that currently is (historically the same build `mesh` pins to, but not guaranteed to stay that way). |
+| `<version>` | An exact version string (e.g. `1.9.2607.13`). |
+| `list` | Print every version NuGet has published for this package, without downloading anything - annotates which are cached locally and which version `mesh`/`stable`/`experimental` currently resolve to. |
+
+**`parse-dxil`**:
+
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--render` / `--no-render` | on | Render `.png` + `.svg` via a PlantUML server next to `outFile`. |
-| `--scale <multiplier>` | `2` | Render scale multiplier (e.g. `3` = triple resolution), passed straight through as PlantUML's own `scale` directive. Raises the rendered `.png`'s pixel resolution proportionally (higher-DPI output); `.svg` is vector, so this mainly affects its declared width/height. An invalid value (non-numeric, zero, or negative) falls back to the default with a warning. |
-| `--server <url>` | `https://www.plantuml.com/plantuml` | PlantUML server base URL. Point this at a local/self-hosted instance for large diagrams — see [Rendering](#rendering-notes) below. |
+| `--define KEY=VALUE` | - | Preprocessor define, passed to `dxc` as `-D KEY=VALUE`. Repeatable. |
+| `--entry NAME` | every node | Restrict the compile to this node's export (`dxc -exports NAME`). Repeatable. |
+| `--dxc <path>` | - | Path to a `dxc.exe` to use directly, instead of one `setup-dxil` installed. |
+| `--dxc-version <mesh\|stable\|experimental\|version>` | auto-detected | Use the `dxc` version `setup-dxil` installed under this name/version. Ignored if `--dxc` is also given. Auto-detection (when neither is passed) is a plain text scan of `entryHLSLFile` for `NodeLaunch("mesh")` - not `#include`-aware, see `docs/ir-format.md`. |
+| `--keep-intermediate <dir>` | throwaway temp dir | Keep the compiled `.dxil` container and `-Fc` disassembly for inspection instead of deleting them after. |
+
+**`build-puml`**:
+
+| Flag | Default | Description |
+| --- | --- | --- |
 | `--dark` / `--light` | light | Diagram colour theme. |
 | `--short-record-out-count` | off | Show only the resolved number in a node's `Record out:` list (`(192)`) instead of the full formula (`(1 * 32 * CUBOID_FACES (6) = 192)`). Falls back to the full formula when the count can't be fully resolved. |
-| `--short-record-in-count` | off | Same, for the `Record in:` line (only shown for coalescing nodes). |
-| `--short-grid-threads-count` | off | Show only the resolved number per `Grid:`/`Threads:` axis (`(32, 1, 1)`) instead of the annotated identifier form (`(QMSN_THREADS (32), 1, 1)`). |
+| `--short-record-in-count` | off | Same, for `Record in:`. |
+| `--short-grid-threads-count` | off | Show only the resolved number per `Grid:`/`Threads:` axis (`(32, 1, 1)`) instead of the annotated identifier form (`(COLLECT_THREADS (32), 1, 1)`). |
 | `--short-meta` | off | Implies `--short-grid-threads-count`; collapses `Depth:`/`Grid:`/`Threads:` into one smaller-font line. Drops `Grid:` for launch modes that can't configure it (coalescing, thread) and `Threads:` for thread-launch nodes (always `(1,1,1)`). |
 | `--short` | off | Shorthand for all four `--short-*` flags above. |
 | `--edge-label` / `--no-edge-label` | on | Show the record type/variable/count note on each edge. Under `--no-edge-label`, only the bare arrow is drawn. |
-| `--global-boxes` / `--no-global-boxes` | off | Draw a box per global GPU resource (`StructuredBuffer`/`ConstantBuffer`/etc. declared with `: register(tN)`), with dashed edges into every node that reads it, replicated once per node-group. The global resource table in the legend lists every global regardless of this flag. |
-| `--global-list` / `--no-global-list` | on | Show a `Globals used:` list in each node's body, for globals actually referenced in its HLSL function body. Independent of `--global-boxes`. |
-| `--record-in-names` / `--no-record-in-names` | off | Show the input record's variable name alongside its type in `Record in:` (e.g. `quadsInput <<QuadRecord>>`). |
+| `--global-boxes` / `--no-global-boxes` | off | Draw a box per global GPU resource, with dashed edges into every node that reads it, replicated once per node-group. The global resource table in the legend lists every global regardless of this flag. |
+| `--global-list` / `--no-global-list` | on | Show a `Globals used:` list in each node's body. Independent of `--global-boxes`. |
+| `--record-in-names` / `--no-record-in-names` | off | Show the input record's variable name alongside its type in `Record in:` (e.g. `quadsInput <<QuadRecord>>`). Only populated by `parse-source`'s IR - see `docs/ir-format.md`. |
 | `--record-out-names` / `--no-record-out-names` | off | Same, for each line of `Record out:`. |
-| `--help`, `-h`, `-?` | — | Print usage and exit without touching the filesystem or network. |
 
-Run `--help` for the exact, current list — flags are added faster than docs sometimes keep up.
+**`puml-render`**:
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--scale <multiplier>` | `2` | Diagram scale, inserted into the `.puml` text as PlantUML's own `scale <n>` directive right before rendering - the `.puml` file on disk is untouched, so the same `build-puml` output can be re-rendered at a different scale without regenerating it. Raises the rendered `.png`'s pixel resolution proportionally; `.svg` is vector, so this mainly affects its declared width/height. |
+| `--server <url>` | `https://www.plantuml.com/plantuml` | PlantUML server base URL. Point this at a local/self-hosted instance for large diagrams - see [Rendering notes](#rendering-notes) below. |
+
+**Every command**: `--help`, `-h`, `-?` - print that command's usage and exit without touching the
+filesystem or network.
 
 ## Examples
 
-Two minimal, runnable work graphs live under [`examples/`](https://github.com/Feirell/hlsl-workgraph-diagram/tree/main/examples) — node skeletons only (attributes and
-records, no real compute logic), just enough HLSL for the tool to have something to diagram. Regenerate
-either one yourself with:
+Two minimal, runnable work graphs live under [`examples/`](https://github.com/Feirell/hlsl-workgraph-diagram/tree/main/examples) - node skeletons only (attributes and
+records, no real compute logic), just enough HLSL for the tool to have something to diagram. Each ships
+both parsers' output side by side, `<parser>.` prefixed (`work-graph.source.*` from `parse-source`,
+`work-graph.dxil.*` from `parse-dxil`) - `.ir.json`, `.puml`, `.png`, and `.svg` each. Regenerate either
+example, either path, yourself with:
 
 ```sh
-npx hlsl-workgraph-diagram examples/simple-pipeline examples/simple-pipeline/work-graph.puml
-npx hlsl-workgraph-diagram examples/mesh-culling examples/mesh-culling/work-graph.puml --global-boxes
+# parse-source path (works everywhere, no dxc needed)
+npx hlsl-workgraph-diagram parse-source examples/simple-pipeline examples/simple-pipeline/work-graph.source.ir.json
+npx hlsl-workgraph-diagram build-puml examples/simple-pipeline/work-graph.source.ir.json examples/simple-pipeline/work-graph.source.puml
+npx hlsl-workgraph-diagram puml-render examples/simple-pipeline/work-graph.source.puml
 
-# or, with yarn:
-yarn dlx hlsl-workgraph-diagram examples/simple-pipeline examples/simple-pipeline/work-graph.puml
-yarn dlx hlsl-workgraph-diagram examples/mesh-culling examples/mesh-culling/work-graph.puml --global-boxes
+# parse-dxil path (needs setup-dxil first - see Usage above). Each example ships its own
+# WorkGraph.hlsl umbrella file (#includes every node) for dxc to compile.
+npx hlsl-workgraph-diagram parse-dxil examples/simple-pipeline/WorkGraph.hlsl examples/simple-pipeline/work-graph.dxil.ir.json
+npx hlsl-workgraph-diagram build-puml examples/simple-pipeline/work-graph.dxil.ir.json examples/simple-pipeline/work-graph.dxil.puml
+npx hlsl-workgraph-diagram puml-render examples/simple-pipeline/work-graph.dxil.puml
 ```
 
-### 1. `examples/simple-pipeline/` — the three main launch modes chained together
+`examples/mesh-culling` needs `--global-boxes` on both `build-puml` calls (to match the rendered images
+below), and its `parse-dxil` call needs an explicit `--dxc-version mesh` - its `WorkGraph.hlsl` reaches
+the mesh node through an `#include`, which the auto-detection heuristic doesn't see (a real, documented
+limitation - see `docs/ir-format.md`).
+
+### 1. `examples/simple-pipeline/` - the three main launch modes chained together
 
 A `broadcasting` entry node fans out work items to a `thread`-launch node, which each produce one result
 gathered by a `coalescing` node:
@@ -140,14 +218,14 @@ void GenerateNode(
 }
 ```
 
-![Simple pipeline diagram: EntryNode (broadcasting) feeds GenerateNode (thread), which feeds CollectNode (coalescing)](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/simple-pipeline/work-graph.png)
+![Simple pipeline diagram: EntryNode (broadcasting) feeds GenerateNode (thread), which feeds CollectNode (coalescing)](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/simple-pipeline/work-graph.source.png)
 
-*([source `.puml`](https://github.com/Feirell/hlsl-workgraph-diagram/blob/main/examples/simple-pipeline/work-graph.puml) · [full-resolution `.svg`](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/simple-pipeline/work-graph.svg))*
+*(via `parse-source`: [`.puml`](https://github.com/Feirell/hlsl-workgraph-diagram/blob/main/examples/simple-pipeline/work-graph.source.puml) · [full-res `.svg`](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/simple-pipeline/work-graph.source.svg) — via `parse-dxil`: [`.puml`](https://github.com/Feirell/hlsl-workgraph-diagram/blob/main/examples/simple-pipeline/work-graph.dxil.puml) · [full-res `.svg`](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/simple-pipeline/work-graph.dxil.svg))*
 
-### 2. `examples/mesh-culling/` — a mesh-launch node reading a global resource
+### 2. `examples/mesh-culling/` - a mesh-launch node reading a global resource
 
 A `broadcasting` node reads an object-count `StructuredBuffer` global and dispatches a `mesh`-launch node
-with a runtime-determined (`NodeMaxDispatchGrid`) dispatch grid — rendered here with `--global-boxes` to
+with a runtime-determined (`NodeMaxDispatchGrid`) dispatch grid - rendered here with `--global-boxes` to
 show the global resource as its own box with a dashed edge into the node that reads it:
 
 ```hlsl
@@ -169,58 +247,123 @@ void RenderMeshNode(
 }
 ```
 
-![Mesh culling diagram: a StructuredBuffer global feeds EntryNode and CullNode (broadcasting), which feeds RenderMeshNode (mesh, dashed border for its dynamic dispatch grid)](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/mesh-culling/work-graph.png)
+![Mesh culling diagram: a StructuredBuffer global feeds EntryNode and CullNode (broadcasting), which feeds RenderMeshNode (mesh, dashed border for its dynamic dispatch grid)](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/mesh-culling/work-graph.source.png)
 
-*([source `.puml`](https://github.com/Feirell/hlsl-workgraph-diagram/blob/main/examples/mesh-culling/work-graph.puml) · [full-resolution `.svg`](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/mesh-culling/work-graph.svg))*
+*(via `parse-source`: [`.puml`](https://github.com/Feirell/hlsl-workgraph-diagram/blob/main/examples/mesh-culling/work-graph.source.puml) · [full-res `.svg`](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/mesh-culling/work-graph.source.svg) — via `parse-dxil`: [`.puml`](https://github.com/Feirell/hlsl-workgraph-diagram/blob/main/examples/mesh-culling/work-graph.dxil.puml) · [full-res `.svg`](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/mesh-culling/work-graph.dxil.svg) — note: `parse-dxil`'s version has no `objects` global box at all, not just an unused one; see below)*
 
 Both diagrams show what the tool infers purely from these attribute lists: launch mode (box colour),
 depth from the graph entry, dispatch grid/thread-group size (with `#define`d constants like
-`RMN_THREADS` resolved to their numeric value), and the record types/counts flowing along each edge — none
-of it hand-authored, all of it read back out of the HLSL above.
+`RMN_THREADS` resolved to their numeric value), and the record types/counts flowing along each edge - none
+of it hand-authored, all of it read back out of the HLSL above. Both examples parse to the same graph
+structure via `parse-dxil` too - the one real difference between the two rendered diagrams here is
+`mesh-culling`'s `objects` `StructuredBuffer`: `CullNode` only reads it through a `GetDimensions()` call
+whose result is never used, so dxc's optimizer eliminates the read entirely and `parse-dxil` never sees it
+at all (`parse-source`'s text scan still finds and lists it, correctly marked used). See
+`docs/ir-format.md`'s "Known differences" section for this and the couple of other verified gaps between
+the two parsers (mainly: `parse-dxil` can't recover a record parameter's own variable name).
+
+## Migrating from v1
+
+Earlier versions of this tool were a single command:
+`hlsl-workgraph-diagram [rootDir] [outFile] [options]`, doing discovery, parsing, PlantUML rendering, and
+PNG/SVG rendering all in one step. That's now three separate commands chained together (see Usage above) -
+a breaking change, made so the dxc-based parser (`parse-dxil`) could exist as a genuine alternative to the
+regex scanner without duplicating the rendering logic. The closest equivalent to the old one-shot
+invocation:
+
+```sh
+# old (v1):
+npx hlsl-workgraph-diagram path/to/shaders work-graph --dark --global-boxes
+
+# new:
+npx hlsl-workgraph-diagram parse-source path/to/shaders work-graph.ir.json
+npx hlsl-workgraph-diagram build-puml work-graph.ir.json work-graph.puml --dark --global-boxes
+npx hlsl-workgraph-diagram puml-render work-graph.puml
+```
+
+Every rendering/display flag (`--dark`, `--short-*`, `--edge-label`, `--global-*`, `--record-*-names`)
+moved to `build-puml` unchanged; `--render`/`--no-render`/`--server`/`--scale` became the separate
+`puml-render` step (always run it if you want PNG/SVG; skip it if you don't - `build-puml` never needs
+network access, and `--scale` is applied at render time, not baked into the `.puml`).
 
 ## Rendering notes
 
-Rendering is on by default and sends the generated PlantUML source (function names, record types, resolved
-constant values, global resource names/slots, and any extracted doc comments) to a PlantUML server — the
-public `https://www.plantuml.com/plantuml` unless `--server` is given. Use `--no-render` if you don't want
-diagram content leaving your machine; the `.puml` file is always written regardless of `--render`.
+`puml-render` sends the `.puml` source (function names, record types, resolved constant values, global
+resource names/slots, and any extracted doc comments) to a PlantUML server - the public
+`https://www.plantuml.com/plantuml` unless `--server` is given. Skip `puml-render` entirely if you don't
+want diagram content leaving your machine; `build-puml`'s `.puml` output never depends on it.
 
 The public PlantUML server has been observed to fail on sufficiently complex diagrams generated by this
-tool — it returns an empty `200 text/plain` response instead of an image, and that failure can then be
+tool - it returns an empty `200 text/plain` response instead of an image, and that failure can then be
 cached at the edge for a while, so retrying the identical request doesn't help. This is a limitation of the
 public server/CDN, not a bug in the generated `.puml`. If you hit it:
 
 - point `--server` at a local or self-hosted PlantUML server (a plain PlantUML webapp works fine), or
-- fall back to `--short --no-edge-label` to reduce the diagram's rendered complexity.
+- fall back to `--short --no-edge-label` on `build-puml` to reduce the diagram's rendered complexity.
 
-The `.puml` output is always valid regardless of which option you pick — only the convenience PNG/SVG
-render is affected.
+The `.puml` output from `build-puml` is always valid regardless of which option you pick - only the
+convenience PNG/SVG render is affected.
 
 **PNG output can be silently cropped** by the PlantUML server's own pixel-size limit (commonly
-`PLANTUML_LIMIT_SIZE`, defaulting to 4096px per dimension) — a large diagram, or a smaller one at a high
+`PLANTUML_LIMIT_SIZE`, defaulting to 4096px per dimension) - a large diagram, or a smaller one at a high
 `--scale`, can come back as a `.png` that's cut off rather than an error. This is a server-side limit, not
 something this tool controls or can raise. `.svg` is vector and never hits it, so it's always the complete
-diagram. The tool detects this automatically (by comparing the `.png`'s actual pixel size against the
+diagram. `puml-render` detects this automatically (by comparing the `.png`'s actual pixel size against the
 `.svg`'s declared size, both already fetched) and prints a warning naming the two fixes: a lower `--scale`,
-or — for a self-hosted server — starting it with `-DPLANTUML_LIMIT_SIZE=<n>` (or the `PLANTUML_LIMIT_SIZE`
+or - for a self-hosted server - starting it with `-DPLANTUML_LIMIT_SIZE=<n>` (or the `PLANTUML_LIMIT_SIZE`
 env var) raised.
 
 ## Limitations
 
-This is a regex/paren-balance scanner over the HLSL source, not a real HLSL/C-preprocessor parser. It has
-been verified against real Work Graph shader trees, but the following aren't handled:
+**`parse-source`** is a regex/paren-balance scanner over the HLSL source, not a real HLSL/C-preprocessor
+parser. It has been verified against real Work Graph shader trees, but the following aren't handled:
 
 - nested comments, `#if`/`#ifdef`-guarded node definitions, multi-line string literals, or attributes split
   across a macro
-- constant resolution only handles pure arithmetic on already-known `#define`/`static const` values —
+- constant resolution only handles pure arithmetic on already-known `#define`/`static const` values -
   anything involving a function call (`intDivRUp(...)`, etc.) is left unresolved and rendered as `(?)`
-- mesh-shader `out indices`/`out vertices`/`out primitives` parameters are recognized but never turned into
-  graph edges (they're rasterizer outputs, not work-graph node-to-node records)
-- reported node depth is longest-path-from-entry over the static graph structure — a strong signal against
-  the Work Graphs 32-depth limit, but not an authoritative guarantee about runtime scheduling behavior
 - global-resource usage detection inspects only the first occurrence of a resource's name in a node's
   function body to decide real-use vs. shadowed-by-a-local-declaration; it doesn't track nested-block
   scoping
+
+**`parse-dxil`** compiles with a real preprocessor and compiler, so none of the above apply to it - but it
+has its own gaps (needing `dxc`, needing a single `#include`-everything entry file, missing record variable
+names, a narrower view of "used" globals) - see [`docs/ir-format.md`](docs/ir-format.md)'s "Known
+differences" section for the full, verified list.
+
+**Both parsers**: mesh-shader `out indices`/`out vertices`/`out primitives` parameters are recognized but
+never turned into graph edges (they're rasterizer outputs, not work-graph node-to-node records).
+
+**`build-puml`** (applies regardless of which parser produced the IR):
+
+- reported node depth is longest-path-from-entry over the static graph structure - a strong signal against
+  the Work Graphs 32-depth limit, but not an authoritative guarantee about runtime scheduling behavior
+
+## Repo layout
+
+```
+src/
+  common/        shared helpers: text/paren utilities, themes, CLI arg parsing, IR read/write
+  parse-source/  the regex-scan parser -> IR JSON
+  parse-dxil/    the dxc-compile parser -> IR JSON
+  setup-dxil/    fetches/caches a dxc build for parse-dxil
+  build-puml/    IR JSON -> .puml
+  puml-render/   .puml -> .png/.svg
+  cli.js         top-level `<command>` dispatcher
+docs/
+  ir-format.md   the shared IR schema, field-by-field, with a verified parser-vs-parser comparison
+fixtures/
+  dxil-parser-fixture/   a small HLSL work graph used to develop/verify parse-dxil (broadcasting -> thread
+                         -> coalescing, plus an optional mesh node; deliberately encodes edge cases like
+                         #define-resolution and #if-0 dead code)
+examples/        the two runnable examples referenced above
+experimental/    narrative research notes from the dxc-based-parsing spike that became parse-dxil/setup-dxil
+                 - historical record of what was tried and verified, not something you need to read to use
+                 the tool
+```
+
+See `generate-workgraph-diagram.md` for a deeper module-by-module reference (what each file does and why,
+gotchas already hit, all the reasoning that doesn't fit in code comments).
 
 ## License
 

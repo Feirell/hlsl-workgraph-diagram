@@ -1,0 +1,193 @@
+{
+  "irVersion": 1,
+  "generator": "parse-dxil",
+  "generatorDetail": {
+    "entryFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\simple-pipeline\\WorkGraph.hlsl",
+    "defines": [],
+    "exportNames": [],
+    "dxcExe": "C:\\Users\\User\\.hlsl-workgraph-diagram\\dxc\\1.9.2607.13\\x64\\dxc.exe",
+    "dxcVersion": "dxcompiler.dll: 1.9(5402-0d3ee6b5)(1.9.0.5402) - 1.9.0.5402 (0d3ee6b55-dirty)"
+  },
+  "nodes": [
+    {
+      "id": "CollectNode",
+      "nodeIdIndex": 0,
+      "functionName": "CollectNode",
+      "group": "nodes-compute",
+      "sourceFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\simple-pipeline/nodes-compute/CollectNode.hlsl",
+      "sourceLine": 17,
+      "comment": "Gathers up to 64 ResultRecords per invocation. Terminal node - no output.",
+      "isEntry": false,
+      "launchMode": "coalescing",
+      "numThreads": {
+        "resolved": [
+          32,
+          1,
+          1
+        ],
+        "source": [
+          "COLLECT_THREADS",
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": null,
+      "maxDispatchGrid": null,
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [
+        {
+          "recordKind": "GroupNodeInputRecords",
+          "recordType": "ResultRecord",
+          "varName": null,
+          "linkedNodeID": null,
+          "maxRecords": {
+            "resolved": 64,
+            "source": null
+          },
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "value",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "outputs": [],
+      "meshOutputs": [],
+      "globalsUsed": []
+    },
+    {
+      "id": "EntryNode",
+      "nodeIdIndex": 0,
+      "functionName": "EntryNode",
+      "group": "nodes-compute",
+      "sourceFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\simple-pipeline/nodes-compute/EntryNode.hlsl",
+      "sourceLine": 18,
+      "comment": "Graph entry point: a fixed 1x1x1 broadcasting dispatch that fans out\nup to 64 work items to GenerateNode.",
+      "isEntry": true,
+      "launchMode": "broadcasting",
+      "numThreads": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "maxDispatchGrid": null,
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [],
+      "outputs": [
+        {
+          "recordKind": "NodeOutput",
+          "recordType": "WorkItemRecord",
+          "varName": null,
+          "linkedNodeID": {
+            "name": "GenerateNode",
+            "index": 0
+          },
+          "maxRecords": {
+            "resolved": 64,
+            "source": null
+          },
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "itemId",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "meshOutputs": [],
+      "globalsUsed": []
+    },
+    {
+      "id": "GenerateNode",
+      "nodeIdIndex": 0,
+      "functionName": "GenerateNode",
+      "group": "nodes-compute",
+      "sourceFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\simple-pipeline/nodes-compute/GenerateNode.hlsl",
+      "sourceLine": 15,
+      "comment": "One thread per WorkItemRecord; produces a single ResultRecord for\nCollectNode to gather.",
+      "isEntry": false,
+      "launchMode": "thread",
+      "numThreads": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": null,
+      "maxDispatchGrid": null,
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [
+        {
+          "recordKind": "ThreadNodeInputRecord",
+          "recordType": "WorkItemRecord",
+          "varName": null,
+          "linkedNodeID": null,
+          "maxRecords": null,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "itemId",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "recordKind": "NodeOutput",
+          "recordType": "ResultRecord",
+          "varName": null,
+          "linkedNodeID": {
+            "name": "CollectNode",
+            "index": 0
+          },
+          "maxRecords": {
+            "resolved": 1,
+            "source": null
+          },
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "value",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "meshOutputs": [],
+      "globalsUsed": []
+    }
+  ],
+  "globals": []
+}

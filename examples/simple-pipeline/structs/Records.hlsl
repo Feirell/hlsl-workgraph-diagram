@@ -4,7 +4,8 @@
 // supervision - it was generated as prompted, code was not adjusted or
 // written. Review before relying on it.
 // ---------------------------------------------------------------------------
-#pragma once
+#ifndef SIMPLE_PIPELINE_STRUCTS_RECORDS_HLSL
+#define SIMPLE_PIPELINE_STRUCTS_RECORDS_HLSL
 
 // Emitted by EntryNode, one record per unit of work.
 struct WorkItemRecord
@@ -17,3 +18,5 @@ struct ResultRecord
 {
     float value;
 };
+
+#endif

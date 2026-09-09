@@ -4,7 +4,15 @@
 // supervision - it was generated as prompted, code was not adjusted or
 // written. Review before relying on it.
 // ---------------------------------------------------------------------------
-#pragma once
+// Include guard, not #pragma once: this file is #included via differently
+// spelled relative paths from nodes-compute/ and nodes-mesh/
+// ("nodes-compute/../structs/Records.hlsl" vs
+// "nodes-mesh/../structs/Records.hlsl"), and dxc's #pragma once tracking
+// doesn't dedupe those as the same file, causing a real
+// "redefinition of 'DispatchRecord'" compile error - see
+// experimental/README.md.
+#ifndef MESH_CULLING_STRUCTS_RECORDS_HLSL
+#define MESH_CULLING_STRUCTS_RECORDS_HLSL
 
 // EntryNode -> CullNode
 struct DispatchRecord
@@ -19,3 +27,5 @@ struct MeshInputRecord
     uint3 DispatchGrid : SV_DispatchGrid;
     uint objectIndex;
 };
+
+#endif

@@ -4,7 +4,8 @@
 // supervision - it was generated as prompted, code was not adjusted or
 // written. Review before relying on it.
 // ---------------------------------------------------------------------------
-#pragma once
+#ifndef SIMPLE_PIPELINE_NODES_COMPUTE_COLLECTNODE_HLSL
+#define SIMPLE_PIPELINE_NODES_COMPUTE_COLLECTNODE_HLSL
 #include "../structs/Records.hlsl"
 
 #define COLLECT_THREADS 32
@@ -21,3 +22,5 @@ void CollectNode(
 )
 {
 }
+
+#endif

@@ -1,0 +1,214 @@
+{
+  "irVersion": 1,
+  "generator": "parse-source",
+  "generatorDetail": {
+    "rootDir": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\mesh-culling",
+    "nodeDirs": [
+      "nodes-compute",
+      "nodes-mesh"
+    ],
+    "filesScanned": 3
+  },
+  "nodes": [
+    {
+      "id": "CullNode",
+      "nodeIdIndex": null,
+      "functionName": "CullNode",
+      "group": "nodes-compute",
+      "sourceFile": "nodes-compute/CullNode.hlsl",
+      "sourceLine": 17,
+      "comment": "Reads the object buffer (no actual culling logic here - this is a\ndiagram skeleton) and emits one mesh-launch record per thread group for\nRenderMeshNode to consume.",
+      "isEntry": false,
+      "launchMode": "broadcasting",
+      "numThreads": {
+        "resolved": [
+          64,
+          1,
+          1
+        ],
+        "source": [
+          "CULL_THREADS",
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "maxDispatchGrid": null,
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [
+        {
+          "recordKind": "DispatchNodeInputRecord",
+          "recordType": "DispatchRecord",
+          "varName": "inputRecord",
+          "maxRecords": null,
+          "recordFields": null
+        }
+      ],
+      "outputs": [
+        {
+          "recordKind": "NodeOutput",
+          "recordType": "MeshInputRecord",
+          "varName": "meshOutput",
+          "linkedNodeID": {
+            "name": "RenderMeshNode",
+            "index": 0
+          },
+          "maxRecords": {
+            "resolved": 64,
+            "source": null
+          },
+          "maxRecordsSharedWith": null,
+          "recordFields": null
+        }
+      ],
+      "meshOutputs": [],
+      "globalsUsed": [
+        "objects"
+      ]
+    },
+    {
+      "id": "EntryNode",
+      "nodeIdIndex": null,
+      "functionName": "EntryNode",
+      "group": "nodes-compute",
+      "sourceFile": "nodes-compute/EntryNode.hlsl",
+      "sourceLine": 12,
+      "comment": "Graph entry point: hands a single dispatch record to CullNode.",
+      "isEntry": true,
+      "launchMode": "broadcasting",
+      "numThreads": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "maxDispatchGrid": null,
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [],
+      "outputs": [
+        {
+          "recordKind": "NodeOutput",
+          "recordType": "DispatchRecord",
+          "varName": "dispatchOutput",
+          "linkedNodeID": {
+            "name": "CullNode",
+            "index": 0
+          },
+          "maxRecords": {
+            "resolved": 1,
+            "source": null
+          },
+          "maxRecordsSharedWith": null,
+          "recordFields": null
+        }
+      ],
+      "meshOutputs": [],
+      "globalsUsed": []
+    },
+    {
+      "id": "RenderMeshNode",
+      "nodeIdIndex": null,
+      "functionName": "RenderMeshNode",
+      "group": "nodes-mesh",
+      "sourceFile": "nodes-mesh/RenderMeshNode.hlsl",
+      "sourceLine": 15,
+      "comment": "Mesh-launch node: rasterizes up to 64 triangles per thread group.",
+      "isEntry": false,
+      "launchMode": "mesh",
+      "numThreads": {
+        "resolved": [
+          32,
+          1,
+          1
+        ],
+        "source": [
+          "RMN_THREADS",
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": null,
+      "maxDispatchGrid": {
+        "resolved": [
+          64,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "maxRecursionDepth": null,
+      "outputTopology": "triangle",
+      "inputs": [
+        {
+          "recordKind": "DispatchNodeInputRecord",
+          "recordType": "MeshInputRecord",
+          "varName": "inputRecord",
+          "maxRecords": null,
+          "recordFields": null
+        }
+      ],
+      "outputs": [],
+      "meshOutputs": [
+        {
+          "kind": "indices",
+          "type": "uint3",
+          "varName": "triangles"
+        },
+        {
+          "kind": "vertices",
+          "type": "Vertex",
+          "varName": "verts"
+        }
+      ],
+      "globalsUsed": []
+    }
+  ],
+  "globals": [
+    {
+      "name": "objects",
+      "resourceClass": "SRV",
+      "rw": false,
+      "kind": "StructuredBuffer",
+      "valueType": "ObjectData",
+      "regType": "t",
+      "regSlot": 0,
+      "space": 0,
+      "file": "structs/Globals.hlsl"
+    }
+  ]
+}

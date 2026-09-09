@@ -4,7 +4,8 @@
 // supervision - it was generated as prompted, code was not adjusted or
 // written. Review before relying on it.
 // ---------------------------------------------------------------------------
-#pragma once
+#ifndef MESH_CULLING_NODES_COMPUTE_ENTRYNODE_HLSL
+#define MESH_CULLING_NODES_COMPUTE_ENTRYNODE_HLSL
 #include "../structs/Records.hlsl"
 
 // Graph entry point: hands a single dispatch record to CullNode.
@@ -24,3 +25,5 @@ void EntryNode(
     ThreadNodeOutputRecords<DispatchRecord> rec = dispatchOutput.GetThreadNodeOutputRecords(1);
     rec.OutputComplete();
 }
+
+#endif

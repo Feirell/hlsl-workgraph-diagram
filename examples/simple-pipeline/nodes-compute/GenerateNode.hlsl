@@ -4,7 +4,8 @@
 // supervision - it was generated as prompted, code was not adjusted or
 // written. Review before relying on it.
 // ---------------------------------------------------------------------------
-#pragma once
+#ifndef SIMPLE_PIPELINE_NODES_COMPUTE_GENERATENODE_HLSL
+#define SIMPLE_PIPELINE_NODES_COMPUTE_GENERATENODE_HLSL
 #include "../structs/Records.hlsl"
 
 // One thread per WorkItemRecord; produces a single ResultRecord for
@@ -22,3 +23,5 @@ void GenerateNode(
     ThreadNodeOutputRecords<ResultRecord> result = resultOutput.GetThreadNodeOutputRecords(1);
     result.OutputComplete();
 }
+
+#endif

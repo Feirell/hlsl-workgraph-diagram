@@ -5,474 +5,310 @@
 
 # generate-workgraph-diagram.js
 
-A dependency-free Node.js script (built-ins only: `fs`, `path`, `zlib`, `http`, `https`) that
-reverse-engineers a D3D12 work-graph's topology directly from its HLSL source and renders it as a
-PlantUML diagram (plus PNG/SVG). Built up iteratively across several conversations; this file is the
-durable reference for extending or debugging it later, since the script has no memory of why each piece
-exists beyond its inline comments.
+A dependency-free Node.js CLI (built-ins only: `fs`, `path`, `zlib`, `http`, `https`, `child_process`) that
+reverse-engineers a D3D12 work-graph's topology from its HLSL source and renders it as a PlantUML diagram
+(plus PNG/SVG). Built up iteratively across several conversations; this file is the durable reference for
+extending or debugging it later, since the code has no memory of why each piece exists beyond its inline
+comments. See the root [`README.md`](README.md) for user-facing usage and [`docs/ir-format.md`](docs/ir-format.md)
+for the JSON shape the two parsers agree on.
 
 ## Module layout
 
-The implementation lives in `src/` modules, one per pipeline stage; `generate-workgraph-diagram.js` at the
-repo root is just the CLI entry point. The numbered pipeline stages below map onto files as follows:
+Five independent commands, each its own directory under `src/`, dispatched by `src/cli.js`
+(`generate-workgraph-diagram.js` at the repo root is just the bin entry: `require('./src/cli.js').main(...)`).
+`src/common/` holds what's shared across more than one of them.
 
-| Stage (see below) | File(s) |
-| --- | --- |
-| CLI parsing / help (`--help` text) | `src/cli.js` |
-| Flag derivation (`SHORT_META`, `GLOBAL_BOXES_ENABLED`, `ROOT_DIR`, `OUT_FILE`, etc.) | `src/options.js` |
-| Low-level string/paren helpers (`splitTopLevel`, `findMatchingParen`/`Brace`, `pumlEscape`, `unquote`, `escapeRegExp`) | `src/text-utils.js` |
-| 1. Discovery (`findNodeDirs`, `listHlslFiles`) | `src/discovery.js` |
-| 2. Comment stripping (`stripComments`, doc-comment extraction) | `src/comments.js` |
-| 3. Node-function extraction - attribute parsing | `src/attributes.js` |
-| 3. Node-function extraction - param classification, `extractNodes` | `src/nodes.js` |
-| 4. Constant resolution (`collectConstants`, `resolveExpr`, `annotate*`) | `src/constants.js` |
-| 6. Global resource index (`collectGlobals`, `isGlobalUsedInBody`) | `src/globals.js` |
-| 7. Depth computation (`computeDepths`) | `src/graph.js` |
-| 9. Theming (`THEMES`) | `src/themes.js` |
-| 8. PlantUML rendering - node label body (`buildLabel` and its helpers) | `src/render/node-label.js` |
-| 8. PlantUML rendering - global resource boxes | `src/render/global-boxes.js` |
-| 8. PlantUML rendering - top-level document assembly (`renderPlantUml`) | `src/render/plantuml-document.js` |
-| 10. PlantUML server rendering (encode/fetch/retry) | `src/plantuml-server.js` |
-| 5. Edge construction + orchestration (`main()`) | `src/index.js` |
-| CLI entry point (kept at this path/name for `npx`/README compatibility) | `generate-workgraph-diagram.js` (thin: `require('./src/index.js')`) |
+| Command dir | Owns | Depends on |
+| --- | --- | --- |
+| `src/parse-source/` | Regex/paren-balance scan of HLSL -> IR JSON | `src/common/` |
+| `src/parse-dxil/` | `dxc` compile of HLSL -> IR JSON | `src/common/`, `src/setup-dxil/paths.js` + `fetch.js` (to locate a cached `dxc` by alias/version) |
+| `src/setup-dxil/` | Fetches/caches a `dxc` build for `parse-dxil` | `src/common/` |
+| `src/build-puml/` | IR JSON -> `.puml` (all rendering/display logic + node-depth computation) | `src/common/` |
+| `src/puml-render/` | `.puml` -> `.png`/`.svg` via a PlantUML server | `src/common/` |
 
-The ~10 CLI display flags (`SHORT_META`, `SHORT_RECORD_OUT_COUNT`, `SHORT_RECORD_IN_COUNT`,
-`SHORT_GRID_THREADS_COUNT`, `EDGE_LABELS_ENABLED`, `GLOBAL_BOXES_ENABLED`, `GLOBAL_LIST_ENABLED`,
-`RECORD_IN_NAMES_ENABLED`, `RECORD_OUT_NAMES_ENABLED`, `GLOBALS_NEEDED`) are deliberately kept as implicit
-shared state rather than threaded through every function signature: they're computed once in
-`src/options.js` and read via `require('../options')` from wherever a given flag is needed (mostly
-`src/render/node-label.js` and `src/render/plantuml-document.js`; `annotateTripleForDisplay` in
-`src/constants.js` reads `SHORT_GRID_THREADS_COUNT` directly, the one flag read outside the `render/`
-tree). This keeps every read site simple, at the cost of each render file having a handful of implicit
-module-level dependencies rather than fully explicit ones. If that trade ever stops being worth it (e.g.
-adding real unit tests that need to vary flags per-test without re-requiring modules), switching to an
-explicit `options` parameter is the natural next step - `src/options.js` already centralizes every flag in
-one place, so that refactor would touch call sites, not flag derivation.
+Within `src/common/`: `text-utils.js` (string/paren helpers: `splitTopLevel`, `findMatchingParen`/`Brace`,
+`pumlEscape`, `unquote`, `escapeRegExp` - shared by `parse-source` and `build-puml`), `themes.js`
+(`THEMES.light`/`.dark`, used by `build-puml`), `cli-args.js` (the small declarative flag parser every
+command's own CLI module uses), `ir.js` (`IR_VERSION`, `writeIrFile()`/`readIrFile()`).
 
-## What it does, end to end
+Each command directory has its own `index.js` (the `run(argv)` entry `cli.js` calls, plus `--help` text)
+and, where relevant, its own `options.js` (flag definitions + derivation, `build-puml`'s is the interesting
+one - see below).
 
-1. **Discovery** — `findNodeDirs()` recursively walks a root directory (first CLI positional arg, default
-   `process.cwd()` — *not* a path relative to the script) looking for any directory named `nodes-*`
-   (currently matches `nodes-compute/` and `nodes-mesh/`, but isn't hardcoded to those two names — any
-   `nodes-*` match at any depth is picked up). All `.hlsl`/`.hlsli` files under each match (recursively) are
-   collected via `listHlslFiles()` and tagged with `group` = that directory's basename, used later purely for
-   the PlantUML `package` grouping/visual layout.
-2. **Comment stripping with position tracking** — `stripComments()` removes `//` and `/* */` comments (never
-   touching the contents of `"..."` string literals) and returns `{ text, rawIndex }`, where `rawIndex[k]` is
-   the original-source offset of stripped-text character `k`. This mapping exists solely so that once a
-   `[Shader("node")]` match is found in the *stripped* text (stripping first is what correctly skips a
-   commented-out/disabled node definition, e.g. the WIP stubs in `nodes-mesh/Experimental.hlsl`, instead of
-   mistaking it for a live one), the script can still recover the *exact* raw-source position to look for a
-   doc comment immediately above it (`extractPrecedingComment()`). Reuse `rawIndex` for any future
-   raw-position lookup rather than re-deriving offsets by hand — stripped and raw text lengths differ.
-3. **Node-function extraction** (`extractNodes()`) — for every `[Shader("node")]` occurrence (this is a
-   regex/paren-balance scanner, not a real HLSL parser — see Limitations below), it: parses the run of
-   `[Attr]`/`[Attr(args)]` blocks before it (`parseAttributesAt()`; attribute names matched
-   case-insensitively via `findAttr()` since the shaders themselves are inconsistent, e.g. `NodeID` vs
-   `NodeId` in `QuadCompactingNode.hlsl`); reads off `NodeLaunch`, `NodeIsProgramEntry`, `NumThreads`,
-   `NodeDispatchGrid`, `NodeMaxDispatchGrid`, `OutputTopology`, `NodeMaxRecursionDepth`; matches
-   `void FunctionName(` and finds the parameter list via paren-balance counting (`findMatchingParen()`);
-   splits parameters on top-level commas only (`splitTopLevel()`, tracking `()`/`[]`/`<>` depth so e.g.
-   `NodeOutput<Foo>` or `[MaxRecords(1 * 64)]` never get split apart); classifies each parameter
-   (`classifyParam()`) against known HLSL work-graph record types (`INPUT_TYPES`/`OUTPUT_TYPES` arrays —
-   extend these if the shaders start using a record kind not yet listed) or as a mesh-shader
-   `out indices`/`out vertices`/`out primitives` array (recorded on the node as `meshOutputs` but
-   deliberately never turned into a graph edge, since those are rasterizer outputs, not work-graph
-   node-to-node records) or as "other" (system-value params like `uint gtid : SV_GroupThreadID`, ignored).
-   A node's own id defaults to its function name unless overridden by a function-level `[NodeID("...")]`.
-4. **Constant resolution** (`collectConstants()` / `resolveExpr()` / `annotate*()`) — separately scans
-   *every* `.hlsl`/`.hlsli` file under the root (not just the `nodes-*` dirs) for `#define NAME value` and
-   `static const T NAME = value;`, building a name→raw-expression table. `resolveExpr()` substitutes known
-   identifiers into an expression (up to 8 passes, enough for one level of indirection like
-   `QUAD_PER_COMPACT_THREAD`) and evaluates the result via `Function(...)` **only** after a character
-   whitelist check (`/^[\s0-9+\-*/().xXa-fA-F]+$/`) — deliberately not a general expression evaluator;
-   anything containing a function call (e.g. `intDivRUp(...)`) is left unresolved (returns `null`).
-   `resolveExpr()` on a bare integer literal (e.g. `"1"`) also just returns that number - there's no special
-   case, it falls out of the same substitute-then-evaluate path.
+## `parse-source`: the regex-scan path
 
-   Several layers build on `resolveExpr()`, each used in a different place and *not* interchangeable:
-   - `annotateIdentifiers()` substitutes *every* identifier token in a string with `IDENT (value)` or
-     `IDENT (?)`, leaving surrounding arithmetic/text untouched (so `1 * 32 * CUBOID_FACES` becomes
-     `1 * 32 * CUBOID_FACES (6)`, not a collapsed product). `annotateExpr()` applies this to a whole
-     expression (skipping pure-numeric ones, nothing to annotate); `annotateTriple()` applies it
-     component-by-component to a comma-separated triple (`NumThreads`/`NodeDispatchGrid`/
-     `NodeMaxDispatchGrid` args) so a bare `1` axis is never misannotated.
-   - `annotateTripleShort()` is the `--short-grid-threads-count` alternative to `annotateTriple()`: each
-     axis shows *only* its resolved number (`32` instead of `QMSN_THREADS (32)`), falling back to the
-     annotated identifier form when an axis doesn't resolve. `annotateTripleForDisplay()` picks between the
-     two based on the `SHORT_GRID_THREADS_COUNT` flag - `classifyGrid()`/`buildThreadsText()` always call
-     this dispatcher, never `annotateTriple()`/`annotateTripleShort()` directly.
-   - `tripleTotalSuffix()` appends `" = <product>"` for a triple once all three axes are multiplied out -
-     but only when at least two of the three axes are *not* literally `1` (skipped whenever two or more axes
-     are literally `1`, since the product then trivially equals the one remaining axis, which is already
-     visible right there - showing `= 32` next to `(32, 1, 1)` would be pure noise). This check is on the
-     raw text (`parts.filter(p => p === '1')`), independent of whether the display itself is short or long
-     form. Skipped entirely if any axis doesn't fully resolve.
-   - `exprTotalSuffix()` is the equivalent for a single expression (`MaxRecords`/`MaxRecordsSharedWith`):
-     appends `" = <value>"` unless the raw expression is already a bare integer literal (nothing to
-     simplify) or doesn't fully resolve.
-   - `edgeRecordCountBraces()` is the edge-note count renderer (see point 8): always shows just the resolved
-     number (`" (192)"`, or `" (?)"` if unresolvable) since edge notes only ever show the number, never the
-     formula - not affected by any `--short-*` flag.
-   - `recordCountBraces(raw, table, shortMode)` is the shared node-box renderer behind both
-     `outputRecordCountBraces()` (passes `SHORT_RECORD_OUT_COUNT`) and `inputRecordCountBraces()` (passes
-     `SHORT_RECORD_IN_COUNT`): normally shows the full annotated formula plus `exprTotalSuffix()` (e.g.
-     `" (1 * 32 * CUBOID_FACES (6) = 192)"`), or - when its flag (or `--short`) is set - just the resolved
-     number, falling back to the full formula (without `=`, since it isn't resolvable) when it can't be
-     resolved.
-5. **Edge construction** (in `main()`) — one edge per output parameter, from the owning node's id to the
-   output's target node id (its `[NodeID("...")]` attribute, or the parameter's variable name if absent, per
-   the HLSL work-graph spec default). Any edge target that isn't among the extracted node ids becomes a
-   placeholder `external / unresolved` rectangle in the diagram rather than silently failing — if this ever
-   fires against real shaders (it's empty today), it usually means either a node file wasn't discovered
-   (check `findNodeDirs()`/naming) or a `[NodeID(...)]` typo in the HLSL.
-6. **Global resource index and usage detection** (`collectGlobals()` / `isGlobalUsedInBody()`) — separately
-   scans *every* `.hlsl`/`.hlsli` file under the root (same breadth as `collectConstants()`, since these live
-   in `structs/*.hlsl`, not `nodes-*`) for HLSL resource-binding declarations: `GLOBAL_DECL_RE` matches
-   `(RW)?<Kind><TValue?> name : register(<letter><slot>[, space<N>]);` — e.g.
-   `StructuredBuffer<BuildingMetaData> glmMetaData : register(t4);` — capturing the resource kind
-   (`StructuredBuffer`, `ConstantBuffer`, ...), the `RW` prefix, the `<T>` value type, the identifier, and
-   the register letter/slot/space. First declaration of a given name wins if it's ever declared twice
-   (shouldn't happen in practice). This whole pass (plus everything below) only runs when
-   `GLOBALS_NEEDED = GLOBAL_BOXES_ENABLED || GLOBAL_LIST_ENABLED` — i.e. skipped entirely (no scan, no body
-   extraction, no per-node matching) when both `--no-global-boxes` and `--no-global-list` are passed, per the
-   "skip the indexing and related work" ask that introduced this feature.
+Files: `discovery.js`, `comments.js`, `attributes.js`, `nodes.js`, `constants.js`, `globals.js`,
+`to-ir.js`, `index.js`.
 
-   Knowing a global *exists* is only half the job — the other half is knowing which node functions actually
-   *read* one, which requires each node's HLSL function body, not just its signature/params
-   (`extractNodes()`'s existing parse target). `extractNodes()` therefore takes a `needsBody` flag
-   (`GLOBALS_NEEDED`, from `main()`); when true, right after locating the parameter list's closing `)`, it
-   finds the next `{` and its balanced match via `findMatchingBrace()` (a `{`/`}`-counting sibling of
-   `findMatchingParen()`) and slices out `n.bodyText`. This is real work (an O(n) brace-scan per node), so
-   it's genuinely skipped, not just hidden, when `GLOBALS_NEEDED` is false.
+1. **Discovery** (`discovery.js`) - `findNodeDirs()` recursively walks a root directory looking for any
+   directory named `nodes-*` (not hardcoded to specific names - any match at any depth). All
+   `.hlsl`/`.hlsli` files under each match (recursively) are collected via `listHlslFiles()` and tagged
+   with `group` = that directory's basename, used later purely for the PlantUML `package` grouping.
+2. **Comment stripping with position tracking** (`comments.js`) - `stripComments()` removes `//` and
+   `/* */` comments (never touching `"..."` string literal contents) and returns `{ text, rawIndex }`,
+   where `rawIndex[k]` is the original-source offset of stripped-text character `k`. This exists so that
+   once a `[Shader("node")]` match is found in the *stripped* text (stripping first correctly skips a
+   commented-out/disabled node definition instead of mistaking it for a live one), the exact raw-source
+   position can still be recovered - for the doc comment immediately above it (`extractPrecedingComment()`)
+   *and* (added when `sourceLine` joined the IR) a 1-based line number via
+   `raw.slice(0, rawPos).split('\n').length`.
+3. **Node-function extraction** (`attributes.js` + `nodes.js`) - for every `[Shader("node")]` occurrence
+   (a regex/paren-balance scan, not a real HLSL parser - see Limitations below): parses the run of
+   `[Attr]`/`[Attr(args)]` blocks before it (`parseAttributesAt()`; names matched case-insensitively via
+   `findAttr()`, since real shader trees are inconsistent about e.g. `NodeID` vs `NodeId`); reads off
+   `NodeLaunch`, `NodeIsProgramEntry`, `NumThreads`, `NodeDispatchGrid`, `NodeMaxDispatchGrid`,
+   `OutputTopology`, `NodeMaxRecursionDepth`; matches `void FunctionName(` and finds the parameter list via
+   paren-balance counting (`findMatchingParen()`); splits parameters on top-level commas only
+   (`splitTopLevel()`, tracking `()`/`[]`/`<>` depth so `NodeOutput<Foo>` or `[MaxRecords(1 * 64)]` never
+   get split apart); classifies each parameter (`classifyParam()`) against `INPUT_TYPES`/`OUTPUT_TYPES`, or
+   as a mesh-shader `out indices`/`out vertices`/`out primitives` array (`meshOutputs`, never a graph edge),
+   or "other" (system-value params, ignored). A node's own id defaults to its function name unless
+   overridden by a function-level `[NodeID("...")]`.
+4. **Constant resolution** (`constants.js`) - `collectConstants()` scans *every* `.hlsl`/`.hlsli` file
+   under the root (not just `nodes-*`) for `#define NAME value` and `static const T NAME = value;`,
+   building a name -> raw-expression table. `resolveExpr()` substitutes known identifiers into an
+   expression (up to 8 passes) and evaluates the result via `Function(...)` **only** after a character
+   whitelist check (`/^[\s0-9+\-*/().xXa-fA-F]+$/`) - deliberately not a general expression evaluator;
+   anything containing a function call (`intDivRUp(...)`) is left unresolved (`null`). This is *pure*
+   resolution only - no display/annotation logic lives here any more (see "Where constants.js's old
+   annotate\* functions went" below).
+5. **Building the IR** (`to-ir.js`) - `buildScalarField()`/`buildTripleField()` turn a raw attribute-text
+   string + the constants table into the shared `{ resolved, source }` shape `docs/ir-format.md` describes,
+   at *parse* time (not render time - the important architectural change from the pre-split tool, see
+   below). `nodeToIr()`/`globalToIr()` assemble one node/global's IR entry.
+6. **Global resource index and usage detection** (`globals.js`) - `collectGlobals()` scans every
+   `.hlsl`/`.hlsli` file for `GLOBAL_DECL_RE`-matching resource-binding declarations:
+   `(RW)?<Kind><TValue?> name : register(<letter><slot>[, space<N>]);`. First declaration of a given name
+   wins if declared twice. `isGlobalUsedInBody(body, name)` decides whether a node's body "uses" a global:
+   find the first `\bname\b` occurrence; if it looks like a **local declaration** shadowing the global (a
+   type-like token before it, `=`/`;`/`[`/`,`/`)` after), treat as unused; otherwise treat as used. This is
+   deliberately *not* full scope tracking (point 5, Limitations) - only the first occurrence is inspected.
+   Each node's `globalsUsed` is filtered from a globals list pre-sorted once by `(regType, regSlot)`, so
+   ordering ("t3 before t5") comes for free.
+7. **Orchestration** (`index.js`) - the CLI entry: discovery, per-file extraction (always with
+   `needsBody: true` now - unlike the pre-split tool, which gated this on `--global-boxes`/`--global-list`
+   flags it no longer has access to; `parse-source`'s job is to extract everything it can, not decide what
+   `build-puml` will later display), attaching `globalsUsed`, calling `buildIr()`, writing the IR JSON.
 
-   `isGlobalUsedInBody(body, name)` decides whether a given global is "used" by one node: find the *first*
-   `\bname\b` occurrence in the body; if there isn't one, unused. If there is, check whether that occurrence
-   looks like a **local declaration** shadowing the global (a type-like token immediately before it, and
-   `=`/`;`/`[`/`,`/`)` immediately after — e.g. `BuildingMetaData glmMetaData = ...;`) - if so, the global is
-   never actually referenced before being shadowed, so treat it as unused; otherwise (a plain reference like
-   `glmMetaData[i]` or `glmMetaData.GetDimensions(...)`) treat it as used. This is deliberately *not* full
-   scope tracking (no handling of nested blocks re-shadowing, no distinguishing multiple local redeclarations
-   later in the body) - it only inspects the first occurrence, which is enough for every node in this
-   codebase (none of them shadow a global's name), but would need real tracking to stay correct if that ever
-   changed. In `main()`, this check runs once per (node, global) pair via nested loops - fine at this scale
-   (14 nodes × 6 globals today), not something to optimize further without reason. Each node's
-   `globalsUsed` array is built by filtering a *pre-sorted* list of globals (`globalsBySlot`, sorted once by
-   `(regType, regSlot)` - "t3 before t5" - so every node's filtered result inherits that order for free,
-   satisfying the "keep the ordering of the slots" ask without a second sort per node.
+## `parse-dxil`: the dxc-compile path
 
-7. **Depth computation** (`computeDepths()`) — every node with `NodeIsProgramEntry` starts at depth 0; every
-   other node gets the length of its *longest* path from any entry node, over *all* paths that reach it (not
-   the shortest) — that's what actually matters against the work graph's hard 32-depth limit (see the
-   DirectX spec reference on node limits), since a node's real worst-case depth is set by its deepest
-   producer chain. Computed via bounded relaxation (Bellman-Ford style: relax every edge, repeat up to
-   `nodes.length` times, stop early once nothing changes) rather than a topological sort, since the graphs
-   here are small. Self-loop edges (`e.from === e.to`, i.e. node self-recursion) are excluded from relaxation
-   so a recursive node doesn't inflate its own depth every pass. Nodes unreachable from any entry (shouldn't
-   happen in a well-formed graph) get `depth: ?`. The depth line is deliberately excluded from the
-   `greyOnes()` "unused default axis" treatment even when it's `1` — depth is a real, meaningful count, never
-   a placeholder.
-8. **PlantUML rendering** (`renderPlantUml()` + helpers) — nodes are grouped into `package` blocks by their
-   `group` (source subdirectory), colored by launch mode via stereotypes (`<<broadcasting>>`, `<<coalescing>>`,
-   `<<thread>>`, `<<mesh>>`, `<<unknown>>` fallback) through a `skinparam rectangle { BackgroundColor<<x>>
-   #hex }` block — the stereotype must be a property suffix *inside* the block
-   (`BackgroundColor<<foo>> #hex`), not on the element type (`rectangle<<foo>> { ... }`, which is a syntax
-   error PlantUML reports as "Assumed diagram type: class" — hit this once already, don't reintroduce it).
-   `<<entry>>` gives a thick colored border (graph entrypoint, `NodeIsProgramEntry`); `<<multi>>` gives a
-   dashed border (grid can expand to more than one thread group per invocation — see `classifyGrid()`:
-   triggered by any `NodeMaxDispatchGrid`, or a `NodeDispatchGrid` where any axis isn't literally `1`).
+Files: `disassembly.js`, `dxil-metadata.js`, `original-attrs.js`, `run-dxc.js`, `to-ir.js`, `index.js`.
+Ported from the `experimental/` spike (see `experimental/README.md` for the full verification history
+behind every design choice below - which DXIL metadata tags are documented vs. empirically observed, the
+`-Zi -Qembed_debug` debug-info approach, every gotcha that was actually hit running real `dxc` compiles).
 
-   **Node label structure** (built by `buildLabel()`), top to bottom:
-   - Name (`n.id`), colored with `theme.nodeNameHighlight` (a distinct hue from the record-type color below,
-     so "this is the node's own identity" reads differently from "this is a record type mentioned on it").
-   - Blank line, then the depth/grid/threads block — two alternate forms, chosen once via `SHORT_META`
-     (`--short-meta`/`--short`):
-     - **Normal** (default): three small italic (`<size:10>`) lines: `Depth: <N>` (never passed through
-       `greyOnes()` — a depth of `1` is a real, meaningful count, not a placeholder default, so it must stay
-       un-greyed unlike the two lines below it), `Grid: ...`, `Threads: ...` (grid/threads *do* get bare `1`
-       axes greyed via `greyOnes()`, using `theme.greyOne`).
-     - **`--short-meta`** (`buildShortMetaLine()`): the same three fields collapsed onto *one* `<size:9>`
-       line, joined with `" | "`. `Grid:` is dropped entirely for launch modes that can never carry a
-       `NodeDispatchGrid`/`NodeMaxDispatchGrid` attribute (coalescing, thread); `Threads:` is dropped only
-       for thread launch specifically (its `NumThreads` is always trivially `(1,1,1)`, unlike coalescing's,
-       which is real and meaningful — e.g. `COMPACTING_THREADS`). `--short-meta` also implies
-       `--short-grid-threads-count` (`SHORT_GRID_THREADS_COUNT = CLI.shortGridThreadsCount || SHORT_META`),
-       since the collapsed line is far too cramped for the long `IDENT (value)` annotated form.
-   - Blank line, then `Globals used:` (`buildGlobalsUsedLines()`, only when `GLOBAL_LIST_ENABLED`) if
-     `n.globalsUsed` is non-empty — one indented line per global, already in slot order (see point 6):
-     `  <ident> (<regType><regSlot>)<space><<ValueType>>` - the identifier (colored `theme.globalHighlight`,
-     matching that global's own box) and register slot lead, since "the identifier and slot... the type
-     itself is not as useful" (several globals here share `float3`/`uint3`); the value type trails in grey
-     guillemets via `recordTypeSpan`-style coloring but *without* an extra nested `<size>` (see the PlantUML
-     rendering-failure note below for why). Immediately followed (same block, no blank line) by `Record in:`
-     (`buildInputRecordLine()`) if the node has an input record param, one
-     line for the header and one indented line for `<<Type>>` (plus, under `--record-in-names`, the input
-     parameter's own variable name prefixed in front of the type, e.g. `quadsInput <<QuadRecord>>` — off by
-     default) — only `GroupNodeInputRecords`/`RWGroupNodeInputRecords` (coalescing) show a count in braces
-     after the type, since every other launch mode receives exactly one record. Immediately followed (same
-     block, no extra blank line) by `Record out:` (`buildOutputRecordsLines()`) if the node has any
-     `NodeOutput`/`EmptyNodeOutput` params — one indented line per output param (not deduplicated by type),
-     each `<<Type>> (<count>)` (likewise prefixed with that output's own variable name under
-     `--record-out-names`, independently toggleable — off by default). Mesh nodes with only
-     `out indices`/`out vertices` (no real `NodeOutput` params) show no `Record out:` at all. Both counts go
-     through the same shared helper, `recordCountBraces(raw, table, shortMode)` (see point 4) —
-     `outputRecordCountBraces()` passes `SHORT_RECORD_OUT_COUNT`, `inputRecordCountBraces()` passes
-     `SHORT_RECORD_IN_COUNT`; the two flags are independent (`--short-record-out-count`/
-     `--short-record-in-count`), each defaulting to the full `IDENT (value) = total` formula and collapsing
-     to just the resolved number when its flag (or `--short`) is set.
-   - Blank line, then the extracted doc comment (if any) at `<size:9>`, one PlantUML line per source line.
-   - `(fn: ...)` at `<size:10>` if the node's id was overridden via `[NodeID(...)]` and differs from its
-     actual HLSL function name.
+1. **`run-dxc.js`** - locates `dxc.exe` in this order: `--dxc <path>` (used directly) > `--dxc-version
+   <name|version>` (resolved via `setup-dxil`'s `aliases.json`/version-keyed cache - see the `setup-dxil`
+   section below) > `HLSL_WORKGRAPH_DXC` env var > auto-detection (picks the `mesh` or `stable` alias via a
+   plain, non-recursive text scan of the entry file for `NodeLaunch("mesh")` - see `docs/ir-format.md`'s
+   "Known differences" #5 for the limitation this heuristic has). Then shells out via
+   `child_process.execFileSync` with
+   `-T lib_6_8 -Zi -Qembed_debug [-Vd if no dxil.dll] -Fo <tmp>.dxil -Fc <tmp>.ll <entryFile>`, into a
+   throwaway temp dir (or `--keep-intermediate <dir>` to keep the `.dxil`/`.ll` for inspection).
+   `getDxcVersionString()` best-effort runs `dxc --version` afterward (works regardless of how `dxc` was
+   located) and stashes the first line in the IR's `generatorDetail.dxcVersion` - `build-puml`'s legend
+   provenance line reads it from there (see the `build-puml` section below).
+2. **`disassembly.js`** - a from-scratch LLVM metadata *text* parser (not a general LLVM IR parser): just
+   enough grammar to walk `!N = !{...}` tuples and `!N = !DIXxx(key: val, ...)` debug-info nodes from a
+   `-Fc` disassembly. `makeResolver(rawMap)` gives a memoized `resolveId(N)` with a call-stack (not
+   visited-set) cycle guard, since this format dedupes/shares metadata nodes constantly.
+3. **`dxil-metadata.js`** - the documented tag scheme (`PROP_TAGS`, `LAUNCH_TYPES` - see the DirectX-Specs
+   WorkGraphs page's "DXIL Shader function attributes" section, cross-checked against dxc's own
+   `DxilMetadataHelper.h`), `decodeProps()`/`decodeIORecord()` (the raw `!dx.entryPoints` tuple ->
+   structured launch mode/`NumThreads`/dispatch grid/I-O record list), `describeParams()` (walks a
+   `DISubroutineType` to recover each I/O parameter's real HLSL type name + the record struct's field
+   list), `getResources()`/`findGlobalsUsed()` (`!dx.resources` + a text scan of the node's own compiled
+   DXIL function body for `createHandleForLib` calls - catches usage through inlined helper functions a
+   source-text scanner never could, and correctly reports *zero* globals for a resource whose only
+   reference got dead-code-eliminated, since the metadata node itself won't exist).
+4. **`original-attrs.js`** - recovers a node's *original*, unevaluated attribute text (e.g. the
+   `COLLECT_THREADS` in `[NumThreads(COLLECT_THREADS, 1, 1)]`) from the same `dx.source.contents` debug
+   info used for comments: `extractLeadingAttributeBlock()` walks the `[...]` lines directly above a
+   function, `extractParamListText()`/`splitParamsTopLevel()` walk its parameter list, `extractAttrArgs()`
+   pulls one attribute's balanced-paren argument text. Pure text extraction - the resolved value always
+   comes from `dxil-metadata.js`.
+**Gotcha (already hit once, don't reintroduce):** `dx.source.contents` preserves a source file's original
+line endings verbatim - CRLF included, if that's how the file was saved. `dxil-metadata.js`'s
+`getSourceFiles()` normalizes every file's content to `\n`-only *once*, right when it's read out of the
+debug info, specifically because every downstream line-based consumer (`extractLeadingComment()`,
+`original-attrs.js`'s attribute-block/parameter-list extraction) splits on `\n` only - left un-normalized, a
+CRLF-saved source file leaves a stray `\r` as the last character of every extracted line. Invisible in a
+terminal, but a literal control character once it lands inside a PlantUML quoted label string - confirmed
+to break the public PlantUML server's parser outright (`Syntax Error? (Assumed diagram type: activity)`,
+hit for real regenerating `examples/simple-pipeline`'s `parse-dxil` output - the `.hlsl` files there are
+CRLF). Don't remove this normalization, and don't add a new line-based text extraction over
+`dx.source.contents`/a file read from `getSourceFiles()` without going through the already-normalized copy.
 
-   **Record-type coloring**: every `<<RecordType>>` mention anywhere in the diagram — in a node's
-   `Record in:`/`Record out:` lines *and* on edge notes — uses the same `theme.recordHighlight` color
-   (`recordTypeSpan()`), so record types read as one consistent visual category throughout.
+5. **`to-ir.js`** - `buildScalarField()`/`buildTripleField()` (parse-dxil's own versions, matching
+   `parse-source/to-ir.js`'s shape but built from a DXIL-resolved number + optional original text, not a
+   constants table). One correctness fix made during the port: a node's *effective graph id* is its own
+   `[NodeID("X")]` self-override (DXIL tag 15 on the entry point itself) when present, else its function
+   name - matching `parse-source`'s convention exactly. The pre-port `parse-workgraph.js` prototype always
+   used the function name, which would have produced a dangling edge for a self-NodeID-overridden node
+   (untested there - no fixture ever exercised it).
 
-   **Global resource boxes** (only drawn under `--global-boxes` — **default off**, since the global
-   resource table in the legend already lists every global either way, so the boxes are opt-in extra detail
-   rather than the default; independent of `--global-list`, which only controls the in-node text list
-   above): every discovered global (point 6) gets a PlantUML
-   `database` (cylinder) shape - a deliberately different silhouette from the node `rectangle`s and edge
-   `note`s, styled via a single `skinparam database { BackgroundColor / BorderColor }` block (`theme.globalBg`/
-   `theme.globalBorder` — every `database` element in the diagram is a global, so there's no need for a
-   per-stereotype skinparam split like the rectangles have). `globalBoxLabel()` builds each box's label:
-   bold identifier (`theme.globalHighlight`), a blank line, `<Kind> · <regType><regSlot>` (e.g.
-   `StructuredBuffer · t4`), and - if the resource has a `<T>` value type - a further grey-guillemets line.
+## `setup-dxil`: fetching dxc
 
-   A global is **replicated once per node-group that actually reads it**, not drawn once for the whole
-   diagram: `globalUsedByGroups` (a `name -> Set<group>` map, built once up front in `renderPlantUml()`)
-   answers "which groups use this global", and inside each group's `package` block **its global boxes are
-   declared first, before that group's node rectangles** (not after), aliased via `globalAlias(name, group)`
-   (`global_<sanitized name>_<sanitized group>`, since PlantUML aliases can't contain a `-`, e.g. the
-   `nodes-compute` group name). This is what keeps `configurationRC` (read by nodes in both `nodes-compute`
-   and `nodes-mesh`) from needing one long edge crossing the whole diagram — it gets two separate boxes, one
-   per group, each only a short hop from its local readers.
+Files: `paths.js`, `nupkg-zip.js`, `fetch.js`, `index.js`. Ported from the spike's
+`tools/fetch-dxc.sh`/`extract-nupkg-entries.js`, rewritten in pure Node (`https` instead of `curl`) so the
+whole tool stays dependency-free and cross-platform-invokable (even though the `dxc.exe` it fetches only
+*runs* on Windows/Wine).
 
-   Edges run **from the global box to the node that reads it** (`global -[dashed]-> node`, not the
-   reverse) - conceptually a global is just another input a node consumes, the same as a produced record,
-   so the edge points the same direction a record-flow edge would; it's dashed (not the plain solid a
-   record edge uses) purely so the two kinds stay visually distinguishable from each other at a glance.
-   Declaring the global *before* the node **and** pointing the edge *into* the node are both deliberate: dot's
-   top-down layered layout uses edge direction (and, as a tie-breaker, declaration order) to decide rank, so
-   together they push each global box above the node(s) it feeds rather than leaving it floating arbitrarily.
-   This is still layout-engine best-effort, not manual placement — a node with several competing incoming
-   edges (globals *and* records) settles wherever dot's overall layout balances out, and that isn't always
-   directly above every single reader in a busy package. Edges are built in a dedicated loop right after the
-   record-flow edges, unlabeled (the node's own `Globals used:` list already spells out identifier/slot/type,
-   so a label on the edge too would just be noise), using the same `groupDir(n)` + `globalAlias()` pairing so
-   every edge lands on the correct group-local replica.
+`paths.js` defines the standard cache location, keyed by exact nuget version string (not by the
+`mesh`/`stable`/`experimental` name given on the command line - those are just aliases that *resolve to* a
+version, see below):
 
-   A global nobody reads anywhere gets **no box at all** (the earlier "globals (unused)" package was
-   removed) — it's only listed in the **global resource table**, prepended to the *same* `legend right`
-   block as the launch-mode color key, ahead of it (a second, separate `legend`/`endlegend` pair was tried
-   first - PlantUML turned out to only keep the last one rather than render both, so everything now lives in
-   one legend, global table first), rendered whenever `globalsIndex.size > 0`, independent of
-   `--global-boxes`/`--global-list`: one row per global (`Identifier | Slot | Kind | Value type | Used?`),
-   sorted by slot like everywhere else, with a `✓`/`✗` in the last column from the same `globalUsedByGroups`
-   map (empty/missing entry → `✗`). Every cell in *both* tables (this one and the color/launch-mode key
-   below it) gets a couple of literal padding spaces on both sides via a shared `pad()` helper - there's no
-   cell-padding skinparam for a legend pipe-table, so literal spaces are the reliable way to give the text
-   room to breathe; `pad()` wrapping a bare `<#hex>` swatch cell (e.g. `pad('<${theme.broadcasting}>')`) was
-   confirmed to still render as a color swatch, not literal text - PlantUML trims the cell before checking
-   for that special form. The identifier column reuses `theme.globalHighlight` in `<b><color:...>` form,
-   matching a global box's own bold name line, so an identifier reads the same everywhere it appears. A
-   short explanation of what each register-slot letter means (`t`=SRV, `u`=UAV, `b`=CBV, `s`=sampler) follows
-   the table - this part is fixed HLSL/D3D12 vocabulary, not data-dependent, so it's always the same four
-   lines regardless of which letters this particular shader tree actually uses.
+```
+~/.hlsl-workgraph-diagram/dxc/<version>/x64/dxc.exe
+~/.hlsl-workgraph-diagram/dxc/aliases.json     <- { "mesh": "1.8.2404.55-mesh-nodes-preview", "stable": "1.9.2607.13", ... }
+```
+
+`writeAlias()`/`resolvedAliasVersion()` read/write `aliases.json` - written by `setup-dxil` after a
+successful install of a *named* variant (not for an explicit version string), read by `run-dxc.js`'s
+auto-detection (mesh vs. stable - see the `parse-dxil` section above) so a `parse-dxil` run never needs to
+re-resolve against nuget itself.
+
+`nupkg-zip.js` is a from-scratch ZIP central-directory reader (a `.nupkg` is a regular, non-zip64 ZIP) -
+reads the End Of Central Directory record from the end of the archive (authoritative sizes even for the
+streamed/data-descriptor case) rather than trusting local file headers, `zlib.inflateRawSync` for deflate
+entries.
+
+`fetch.js`'s `resolveVariant(nameOrVersion)` turns `mesh`/`stable`/`experimental`/an exact version string
+into a concrete version to install:
+- `mesh` -> the fixed, pinned `1.8.2404.55-mesh-nodes-preview` (a known-good version, not "whatever's
+  newest" - see the root README).
+- `stable` -> `resolveLatestStableVersion()`, which hits **NuGet's search API**
+  (`azuresearch-usnc.nuget.org`, `prerelease=false`) specifically, *not* the full version list.
+- `experimental` -> the latest entry (by `compareVersions()`) with a prerelease tag, from
+  `listAllVersions()` (NuGet's flat-container `index.json`, the *full* publish history).
+- anything else -> used as-is (existence is checked by the download itself, not pre-validated).
+
+**Gotcha (already hit once, don't reintroduce):** `stable` must **not** be resolved by taking the
+numerically-highest non-prerelease entry out of `listAllVersions()`. Confirmed against the real package:
+NuGet's flat-container index for `Microsoft.Direct3D.DXC` includes a `101.7.2207.25` entry that sorts
+higher than every real release (almost certainly a publishing mistake) but is **delisted** - absent from
+NuGet's own search results. `listAllVersions()` is still the right source for `list` (showing the full
+history is useful) and `experimental` (a prerelease being delisted has never been observed and would be a
+separate problem), but `stable` specifically has to go through the search API, which correctly reflects
+what NuGet itself currently considers "latest".
+
+`ensureDxcInstalled(version)` is idempotent (skips the network entirely if `dxc.exe` already exists at that
+version's cache path), downloads the `.nupkg`, extracts `dxc.exe`/`dxcompiler.dll` (required) and
+`dxil.dll` (best-effort - not every version ships one; `run-dxc.js` passes `-Vd` to skip validation when
+it's absent).
+
+## `build-puml`: IR JSON -> PlantUML
+
+Files: `options.js`, `node-label.js`, `global-boxes.js`, `document.js`, `graph.js`, `index.js`. This is
+where every display/layout decision lives, and the one place `parse-source`'s and `parse-dxil`'s output
+actually looks identical - both already resolved their `{resolved, source}` fields into the IR before this
+runs (see `docs/ir-format.md`).
+
+**Where the pre-split tool's `constants.js` `annotate*`/`grey*`/`*TotalSuffix` functions went**: they used
+to run at *render* time, reading a whole-codebase constants table threaded through every render call.
+That table doesn't exist any more - `node-label.js` now has its own `formatTripleAxis()`/`formatTriple()`/
+`tripleTotalSuffix()`/`formatScalarInline()`/`scalarBraces()`/`scalarTotalSuffix()`/`greyOnes()`, all
+operating directly on an IR field's already-resolved `{resolved, source}` shape instead of `(rawText,
+table)`. One deliberate behavior change: an unresolved *compound* expression no longer gets
+per-identifier sub-annotation (there's no table left to re-walk at render time) - the original text is
+still shown in full, just not further annotated token-by-token. See `docs/ir-format.md`'s "Value fields"
+section for the full reasoning.
+
+1. **Node depth** (`graph.js`, unchanged from the pre-split tool other than its location) - every
+   `isEntry` node starts at depth 0; every other node gets the length of its *longest* path from any entry
+   node, over *all* paths that reach it (not the shortest) - what matters against the work graph's hard
+   32-depth limit, since a node's real worst-case depth is set by its deepest producer chain. Computed via
+   bounded relaxation (Bellman-Ford style: relax every edge, repeat up to `nodes.length` times, stop early
+   once nothing changes), excluding self-loop edges from relaxation. This now runs regardless of which
+   parser produced the IR - a graph algorithm over `id` + edges needs nothing parser-specific, which is why
+   it lives here instead of in either parser (closing what used to be a "not yet implemented for
+   `parse-dxil`" gap, for free, as part of the split).
+2. **`index.js`** - reads the IR, derives `edges[]` from every `outputs[].linkedNodeID` (skipping outputs
+   with none), finds `externalIds` (edge targets not among the IR's own node ids), computes depths, calls
+   `renderPlantUml()`, writes the `.puml`.
+3. **PlantUML rendering** (`document.js` + `node-label.js` + `global-boxes.js`) - nodes are grouped into
+   `package` blocks by `group`, colored by launch mode via stereotypes
+   (`<<broadcasting>>`/`<<coalescing>>`/`<<thread>>`/`<<mesh>>`/`<<unknown>>` fallback) through a
+   `skinparam rectangle { BackgroundColor<<x>> #hex }` block - the stereotype must be a property suffix
+   *inside* the block (`BackgroundColor<<foo>> #hex`), not on the element type (`rectangle<<foo>> { ... }`,
+   a syntax error PlantUML reports as "Assumed diagram type: class"). `<<entry>>` gives a thick colored
+   border; `<<multi>>` gives a dashed border (grid can expand to more than one thread group per invocation
+   - `classifyGrid()`: any `maxDispatchGrid`, or a `dispatchGrid` where any axis isn't a plain literal `1`).
+
+   **Node label structure** (`buildLabel()`), top to bottom: name (`n.id`, `theme.nodeNameHighlight`);
+   blank line, then depth/grid/threads (normal: three `<size:10>` lines, `Depth:` never grey-out'd even
+   when `1` since it's a real count, `Grid:`/`Threads:` axes that are bare literal `1`s are; `--short-meta`:
+   `buildShortMetaLine()` collapses all three onto one `<size:9>` line, dropping `Grid:` for
+   coalescing/thread and `Threads:` for thread specifically); blank line, then `Globals used:`
+   (`buildGlobalsUsedLines()`, gracefully rendering `?` for any field a generator couldn't fill - see
+   `docs/ir-format.md`) + `Record in:`/`Record out:` (`buildInputRecordLine()`/`buildOutputRecordsLines()`,
+   only `GroupNodeInputRecords`/`RWGroupNodeInputRecords` show an input count, since every other launch mode
+   receives exactly one record); blank line, then the doc comment at `<size:9>`; `(fn: ...)` at `<size:10>`
+   if the id was overridden.
+
+   **Record-type coloring**: every `<<RecordType>>` mention - in `Record in:`/`Record out:` *and* edge
+   notes - uses `theme.recordHighlight` (`recordTypeSpanFor()`), so record types read as one visual
+   category throughout.
+
+   **Global resource boxes** (`--global-boxes`, default off - the legend's global table already lists
+   every global either way) - a `database` (cylinder) shape per global *replica*, one per node-group that
+   actually reads it (not once for the whole diagram): `globalUsedByGroups` (`name -> Set<group>`) drives
+   both the replication and each box's alias (`globalAlias()`, `global_<sanitized name>_<sanitized
+   group>`). Boxes are declared *before* that group's node rectangles, and edges run *from* the box *into*
+   the node (`-[dashed]->`) - both deliberate, since PlantUML's layered layout uses edge direction +
+   declaration order as rank tie-breakers, pushing each global above its readers. A global nobody reads
+   anywhere gets no box at all, only a row in the global resource table.
 
    **Gotcha (already hit once, don't reintroduce):** PlantUML's creole formatting tags do **not** carry
-   across an embedded `\n` inside one label string — closing tags on a line after the one that opened them
-   render as *literal text* instead of being consumed. Every multi-line formatted block (e.g. `Record in:` +
-   its value line) must give each visual line its own complete `<i><size:10>...</size></i>` pair
-   (`smallItalicLine()`), then join those complete units with `\\n` — never open a tag on one line and close
-   it after a `\\n` inside the same span.
+   across an embedded `\n` inside one label string - closing tags on a line after the one that opened them
+   render as *literal text*. Every multi-line formatted block must give each visual line its own complete
+   `<i><size:10>...</size></i>` pair (`smallItalicLine()`), joined with `\\n`.
 
-   **Gotcha #2 (confirmed public-server-side, not a content bug — a local server is the fix):** the public
-   PlantUML server has been observed to fail to render this diagram once its overall complexity crosses some
-   threshold — it returns an empty `200 text/plain` response instead of an image, and Cloudflare (which
-   fronts plantuml.com) then caches that empty failure at the edge for up to 30 days
-   (`Cache-Control: public, max-age=2592000`), so a naive retry of the *identical* request can keep failing
-   for that long even if the underlying content is fine. This was hit adding the globals feature:
-   `BuildingMassEmitNode` (the only node with both a doc comment *and* several `Globals used:`/
-   `Record in/out` lines) reliably failed - even completely removing its comment, or its globals block, or
-   wrapping the comment differently, did not fix it once the *rest* of the real diagram (all 14 nodes, 17
-   edges, 6 globals, legend) was present too. Small isolated repros of "just this one node" kept rendering
-   fine, which is what made this deceptive at first - the trigger looked like some accumulated
-   total-document complexity, not a specific tag pattern.
+   **Gotcha #2 (confirmed public-server-side, not a content bug):** the public PlantUML server has been
+   observed to return an empty `200 text/plain` response instead of an image once a diagram's overall
+   complexity crosses some threshold, and Cloudflare then caches that empty failure at the edge for up to
+   30 days. Confirmed via a local PlantUML server that the `.puml` itself was valid all along - the failure
+   is specific to the public deployment. Mitigations: `puml-render`'s `fetchBinary()` validates the
+   response is actually `image/*` and non-empty, retrying before throwing a loud error; `--short
+   --no-edge-label` (on `build-puml`) is a fallback that's been confirmed to render the same dataset
+   successfully via the public server when the full-detail version failed there. Prefer `--server` pointed
+   at a local/self-hosted instance when one's available.
+   **Legend** (`legend right` block, `document.js`) - the launch-mode color key, border/edge
+   explanations, and (when any globals exist) the global resource table all share PlantUML's single legend
+   (a second `legend`/`endlegend` pair was found to silently replace the first, not coexist with it).
+   `skinparam LegendFontSize 11` keeps it visually subordinate to the diagram's main content (down from
+   PlantUML's default ~14). No `scale` directive is emitted here any more - see the `puml-render` section
+   below for where that moved. The very last line, `provenanceLine()`: a small (`<size:7>`), grey
+   (`theme.greyOne`) line naming this package's version, which generator produced the IR
+   (`ir.generator`), the path/file it parsed (`ir.generatorDetail.rootDir` or `.entryFile`), and - only for
+   `parse-dxil` output - the `dxc` version string (`ir.generatorDetail.dxcVersion`, from `run-dxc.js`'s
+   `getDxcVersionString()`). Reproducibility/provenance info, deliberately low-emphasis - not something a
+   reader needs unless they're asking "where did this diagram come from".
+4. **Theming** (`../common/themes.js`) - `THEMES.light`/`.dark`, one hex-color dictionary per theme,
+   `renderPlantUml()`/`node-label.js` always read `theme.*`, never a hardcoded color. Adding a third theme
+   means adding a key to `THEMES` and wiring it into `build-puml/options.js`.
 
-   **Root cause since confirmed via a local PlantUML server** (a plain Tomcat + PlantUML webapp reachable in
-   this environment - see the `plantuml-local-server` memory for the exact address/gotchas): pointing
-   `--server` at it (`--server http://172.18.0.2:8080`, no `/plantuml` path segment - this instance is
-   deployed at ROOT, unlike the public one) rendered the exact same full-detail `.puml` correctly on the
-   first try. So the `.puml` was valid all along; the failure is specific to the public plantuml.com
-   deployment/CDN (resource limits, an older PlantUML build, or the Cloudflare/Ezoic layer in front of it -
-   not narrowed further, and not worth narrowing further given a working alternative exists). Two mitigations
-   are in place regardless: (1) `fetchBinary()`/`fetchBinaryWithRetry()` validate the response is actually
-   `image/*` and non-empty, retrying a few times before throwing, turning a silent 0-byte "success" into a
-   loud, honest failure with a clear message (retrying the exact same request was NOT observed to help
-   against the public server for this trigger - it's deterministic given the content, not transient - but
-   it's cheap insurance against genuinely transient network blips); (2) `--short --no-edge-label` was also
-   confirmed to render this exact dataset successfully via the *public* server when the full-detail version
-   failed there, as a fallback for environments without a local server available. Prefer `--server` pointed
-   at a local/self-hosted PlantUML instance over complexity-reduction flags when one is available - it gets
-   the full-detail diagram without compromise.
+## `puml-render`: PlantUML server rendering
 
-   **Edge labels** (skipped entirely under `--no-edge-label`, in which case only the bare
-   `e.from --> e.to` arrow line is emitted): not inline arrow text (`A --> B : label` can't have a border)
-   — rendered as a `note on link` block (plain arrow line, then `note on link` / indented lines /
-   `end note`) specifically so PlantUML draws a visible border around them (`NoteBackgroundColor`/
-   `NoteBorderColor`/`NoteBorderThickness 1`/`NoteFontSize 9`, all theme-driven). Each note is, top to
-   bottom:
-   - `<<RecordType>>` (or `<<empty>>`) via `recordTypeSpan()`, immediately followed by the resolved record
-     count in braces from `edgeRecordCountBraces()` — e.g. `<<QuadRecord>> (192)`, or `(?)` if unresolvable.
-     There's no separate `Max:` line any more (removed) — the count lives right after the type on this one
-     line. Unlike the node-box counts, this one is *never* the long formula — edge notes only ever show the
-     plain resolved number, unaffected by any `--short-*` flag.
-   - The output variable name (e.g. `quadOutput`) at `<size:8>` — deliberately smaller than the record-type
-     line above it.
-   - `shared: ...` at `<size:9>` (via `annotateExpr()` + `exprTotalSuffix()`, unaffected by
-     `--short-record-out-count`/`--short-record-in-count` — those flags only target node-box `Record out:`/
-     `Record in:` lines) if `MaxRecordsSharedWith` is set (not exercised by any node in this codebase
-     today).
-9. **Theming** (`THEMES.light`/`THEMES.dark`, selected via `--dark`/`--light`, default light) — one
-   dictionary of hex colors per theme covering canvas background, default font color, arrow color, note
-   background/border, package border/background, legend border/background, per-launch-mode rectangle fill,
-   the entry-border/grey-one colors, and three highlight colors: `recordHighlight` (purple in light mode,
-   light purple in dark mode — every `<<RecordType>>` mention), `nodeNameHighlight` (dark blue in light
-   mode, light blue in dark mode — a node's own name line), and `globalBg`/`globalBorder`/`globalHighlight`
-   (a warm tan/gold family in both modes — every global resource `database` box and its identifier text in
-   a node's `Globals used:` list), all kept visually distinct from each other on purpose. Adding a third
-   theme means adding a key to `THEMES` and wiring it into `parseArgs()`/the CLI help text; `renderPlantUml()`
-   itself is theme-agnostic (always reads from `theme.*`, never a hardcoded color).
-10. **PlantUML server rendering** (`plantumlEncode()` / `fetchBinary()` / `fetchBinaryWithRetry()` /
-   `renderWithPlantumlServer()`) — implements PlantUML's own text-encoding scheme by hand (UTF-8 → raw
-   DEFLATE via Node's built-in `zlib` → PlantUML's custom base64-like 64-char alphabet, see
-   `plantumlEncode6bit()`/`plantumlAppend3Bytes()`) so the diagram can be requested via a plain
-   `GET .../png/<encoded>` and `.../svg/<encoded>` against a PlantUML server. **Default server is the public
-   `https://www.plantuml.com/plantuml`, and rendering is on by default** — every run sends the full diagram
-   source (function names, record types, resolved constant values, global resource names/slots, and any
-   extracted doc comments) to that third-party server unless `--no-render` is passed. `fetchBinary()`
-   validates the response is actually non-empty `image/*` (see Gotcha #2 in point 8 for why this check
-   exists) and `fetchBinaryWithRetry()` retries a failing fetch up to 3 times (1.5s backoff) before giving
-   up; on final failure (e.g. no network, or the point-8 Gotcha #2 rendering limit) it's caught in `main()`
-   and logged as a detailed warning suggesting `--short`/`--no-edge-label`/a local render/`--no-render`; the
-   `.puml` file is still written either way, since only the optional convenience render failed.
+Files: `plantuml-server.js`, `index.js`. `plantumlEncode()` implements PlantUML's own text-encoding scheme
+by hand (UTF-8 -> raw DEFLATE via Node's built-in `zlib` -> a custom 64-char alphabet) so the diagram can be
+requested via a plain `GET .../png/<encoded>`/`.../svg/<encoded>`. `fetchBinary()` validates the response is
+actually non-empty `image/*` (see Gotcha #2 above); `fetchBinaryWithRetry()` retries up to 3 times (1.5s
+backoff). `readPngDimensions()` (reads the IHDR chunk directly) and `readSvgDimensions()` (regexes the root
+`<svg>` tag) are compared to detect the PlantUML-server pixel-size-limit cropping bug (see the root
+README's Rendering notes) - both images are already fetched, so the comparison costs nothing extra.
 
-## CLI
-
-```
-node generate-workgraph-diagram.js [rootDir] [outFile] [--render|--no-render] [--scale <multiplier>]
-  [--server <url>] [--dark|--light] [--short-record-out-count] [--short-record-in-count]
-  [--short-grid-threads-count] [--short-meta] [--short] [--edge-label|--no-edge-label]
-  [--global-boxes|--no-global-boxes] [--global-list|--no-global-list]
-  [--record-in-names|--no-record-in-names] [--record-out-names|--no-record-out-names] [--help|-h|-?]
-```
-
-- `rootDir` defaults to `process.cwd()` and is recursively searched for `nodes-*`.
-- `outFile` defaults to `work-graph.puml`. Resolution (`options.js`'s `OUT_FILE` derivation): `.puml` is
-  appended if not already present (so a bare `wow/test` becomes `wow/test.puml`), then the result is passed
-  through `path.resolve()` - relative paths are joined onto the current working directory (`wow/test` ->
-  `<cwd>/wow/test.puml`), an absolute path is used exactly as given, unchanged. `.png`/`.svg` land next to
-  the `.puml` either way, named by stripping the `.puml` extension. Any subdirectory the resolved path
-  needs (e.g. `wow/` above) is created via `fs.mkdirSync(..., { recursive: true })` in `main()`
-  (index.js) right before writing, so it doesn't need to already exist.
-- `--scale <multiplier>` — raises the rendered `.png`'s pixel resolution proportionally (a raster format,
-  rendered at a fixed base DPI otherwise); `.svg` is vector, so this mainly affects its declared
-  width/height. Default `2`. The value is `SCALE_MULTIPLIER` (`options.js`), passed straight through as
-  PlantUML's own `scale <n>` directive, the very first content line after `@startuml`
-  (`src/render/plantuml-document.js`) - `scale 2` doubles the rendered size, `scale 1.5` is 1.5x, etc.
-  **Gotcha (why this is a multiplier, not a percentage):** PlantUML also has a `scale N%` percentage form,
-  but it is not supported by every server version - confirmed via the local server in this environment (see
-  the `plantuml-local-server` memory) to silently break diagram-type autodetection: the server returns
-  `HTTP 400` with a real PNG body reading "Assumed diagram type: sequence" / "Syntax Error?" instead of the
-  diagram, and since that's a non-`image/*`-adjacent failure `fetchBinary()` still catches it, just with a
-  less specific error message than the empty-response case below. The plain multiplier form (`scale 2`,
-  `scale 1.5`) is universally supported, which is why `--scale` takes and emits a multiplier directly with
-  no conversion - never reintroduce the `N%` form here. An invalid `--scale` value (non-numeric, zero, or
-  negative) falls back to the `2` default with a warning (`options.js`), rather than emitting something
-  PlantUML would reject outright.
-- `--short-record-out-count` — see point 4/8 above: collapses each node's `Record out:` entries to just the
-  resolved count (`(192)`) instead of the full formula (`(1 * 32 * CUBOID_FACES (6) = 192)`). Only affects
-  `Record out:`; `Record in:` and edge notes are unaffected.
-- `--short-record-in-count` — the same collapse, but for the `Record in:` line's count (only ever shown for
-  coalescing nodes, since every other launch mode receives exactly one record with no count to show).
-- `--short-grid-threads-count` — collapses each axis of `Grid:`/`Threads:` to its resolved number
-  (`(32, 1, 1)`) instead of the annotated identifier form (`(QMSN_THREADS (32), 1, 1)`). The `= <product>`
-  suffix suppression rule (point 4) applies either way, independent of this flag.
-- `--short-meta` — implies `--short-grid-threads-count`, and collapses `Depth:`/`Grid:`/`Threads:` into one
-  `<size:9>` line (down from three `<size:10>` lines), dropping `Grid:` for coalescing/thread nodes (can't
-  configure it) and `Threads:` for thread nodes specifically (always trivially `(1,1,1)`). See point 8,
-  `buildShortMetaLine()`.
-- `--short` — shorthand that turns on all four flags above at once
-  (`SHORT_RECORD_OUT_COUNT = CLI.shortRecordOutCount || CLI.short`, and likewise for the other three;
-  `SHORT_GRID_THREADS_COUNT` ends up true via either its own flag or `SHORT_META`).
-- `--edge-label` / `--no-edge-label` — whether edges get a `note on link` at all (record type, variable
-  name, count). Default on. Under `--no-edge-label` only the bare `A --> B` arrow is emitted, no `note on
-  link` block. Reads `EDGE_LABELS_ENABLED`.
-- `--global-boxes` / `--no-global-boxes` — whether every *used* global resource gets a `database` box
-  (replicated once per consuming node-group, positioned above and dashed-arrow-pointing into the node(s)
-  reading it). **Default off** (`--no-global-boxes`) — the global resource table in the merged legend
-  already lists every global either way, so the boxes are opt-in extra detail rather than the default.
-  Independent of `--global-list`; independent also of the global resource table (in the `legend right`
-  block), which still lists every global — used or not — as long as any globals were found at all. See
-  point 8's "Global resource boxes".
-- `--global-list` / `--no-global-list` — whether a node's body shows its `Globals used:` list. Default on.
-  Independent of `--global-boxes` — either can be off alone, e.g. keep the default (list, no boxes) for a
-  less cluttered diagram that still tells you *which* globals a node reads, or `--no-global-list` with
-  `--global-boxes` to show the boxes/edges but drop the redundant in-node text. When *both* are off,
-  `GLOBALS_NEEDED` is false and the whole feature (the tree-wide `collectGlobals()` scan, the per-node body
-  extraction/matching) is skipped, not just hidden — see point 6.
-- `--record-in-names` / `--no-record-in-names` — whether a node's `Record in:` line also shows the input
-  parameter's variable name alongside its type (e.g. `quadsInput <<QuadRecord>>` instead of just
-  `<<QuadRecord>>`) — the same idea as an identifier in `Globals used:`. **Default off.**
-- `--record-out-names` / `--no-record-out-names` — the same, but for every line of a node's `Record out:`
-  list (each output param's own variable name, e.g. `buildingOutput <<BuildingRootRecord>>`). **Default
-  off.** Independent of `--record-in-names`.
-- `--help`/`-h`/`-?` print the same summary and exit before touching the filesystem or network.
-
-All of the `--short-*`/`--edge-label`/`--global-*` flags resolve to plain module-level consts derived from
-`CLI.*` (same pattern as `DARK_MODE`/`RENDER_ENABLED`) — none of them are threaded through function
-parameters, they're just read directly wherever needed.
+**`--scale`** lives here, not on `build-puml`: `index.js`'s `withScale()` inserts (or replaces) a `scale
+<n>` line right after `@startuml` in the `.puml` *text in memory*, immediately before encoding it for the
+server - the `.puml` file on disk is never rewritten. This is why the same `build-puml` output can be
+re-rendered at a different scale without regenerating it. Still deliberately the plain multiplier form
+(`scale 2`), never PlantUML's `scale N%` percentage syntax - confirmed on a real PlantUML server version to
+silently break diagram-type autodetection (`HTTP 400`, "Assumed diagram type: sequence" / "Syntax Error?",
+with no warning from `fetchBinary()` since the response is still a real, non-empty `image/*`-adjacent
+error). Never reintroduce the percentage form here.
 
 ## Known limitations (read before extending)
 
-- It's a regex/paren-balance scanner, not a real HLSL/C-preprocessor parser. Verified against every file in
-  `nodes-compute/`/`nodes-mesh/` as of the diagram's last regeneration, but would need care for: nested
-  comments, `#if`/`#ifdef`-guarded node definitions, multi-line string literals, or attributes split across a
-  macro.
-- `resolveExpr()` only resolves pure arithmetic on already-known constants; anything with a function call
-  (`intDivRUp(...)`, `generateSolarPanel(...)`, etc.) renders as `(?)` by design, not a bug.
-- Mesh-shader `out indices`/`out vertices`/`out primitives` parameters are parsed (`meshOutputs` on the node
-  object) but deliberately never turned into graph edges.
-- `computeDepths()` reports longest-path depth from an entry node (max over all paths to a node), excluding
-  self-recursion edges from the relaxation — a close proxy for the D3D12 32-depth limit, but still a static
-  approximation of what's ultimately a runtime scheduling property; treat it as a strong sanity signal, not
-  an authoritative "will this exceed 32" check.
-- No test suite; verification so far has been re-running against the real `MasterThesis/shaders` tree and
-  eyeballing the rendered PNG (the Read tool can view PNGs directly) after each change — do that after any
-  edit here, ideally in both `--light` and `--dark`.
-- `isGlobalUsedInBody()` only inspects a global's *first* occurrence in a node's body to decide
-  used-vs-shadowed-by-a-local (point 6); it doesn't track scope/blocks, so a local re-declared *after* an
-  earlier genuine use, or shadowing inside a nested block, wouldn't be handled correctly. Not an issue for
-  any node in this codebase today (none shadow a global's name), but would need real scope tracking to stay
-  correct if that ever changed.
-- The *public* PlantUML server can fail to render this diagram once its overall complexity crosses some
-  threshold — see Gotcha #2 under point 8's Global resource boxes for the full story (what triggered it,
-  what didn't fix it, and how a local PlantUML server confirmed the `.puml` was valid all along).
-  `fetchBinary()` detects this (non-image response) and retries before failing loudly, rather than silently
-  writing an empty PNG/SVG. Prefer `--server` pointed at a local/self-hosted instance when one's available
-  (see the `plantuml-local-server` memory) over `--short`-ing the diagram down to work around it.
-- **PNG output can be silently cropped by the PlantUML server's own pixel-size limit** (commonly
-  `PLANTUML_LIMIT_SIZE`, defaulting to 4096px per dimension in the reference implementation — not something
-  this tool controls, and not adjustable per-request via the `.puml` text or a URL parameter). Confirmed
-  against the real `MasterThesis/shaders` diagram at `--scale 2`: the `.svg` correctly reports 3688x5078,
-  but the `.png` for the identical request came back 3686x4096 — width scaled fine (under the cap), height
-  silently clamped, no error from the server. `.svg` is vector and has no such limit, so it's always the
-  complete diagram. `renderWithPlantumlServer()` (`plantuml-server.js`) now detects this automatically:
-  since both the PNG (via `readPngDimensions()`, reading the IHDR chunk directly) and the SVG (via
-  `readSvgDimensions()`, regexing the root `<svg>` tag's `width`/`height`) are already fetched in the same
-  call, comparing them costs nothing extra. A `CROP_TOLERANCE_PX` of 16 absorbs the few-pixel rounding
-  slack normally seen between the two even when nothing was cropped (observed up to ~2px on an uncropped
-  diagram) — real cropping is off by hundreds of pixels at minimum, so the tolerance never masks it. When
-  it fires, the warning names the likely cause and the two fixes: a lower `--scale`, or (for a self-hosted
-  server) starting it with `-DPLANTUML_LIMIT_SIZE=<n>` (or the `PLANTUML_LIMIT_SIZE` env var) raised.
+See the root [`README.md`](README.md)'s Limitations section (organized by which command they apply to) and
+[`docs/ir-format.md`](docs/ir-format.md)'s "Known differences between the two generators" (a verified,
+not hypothetical, comparison run against both `examples/` trees). Nothing duplicated here.

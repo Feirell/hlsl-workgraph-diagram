@@ -1,8 +1,16 @@
-# Experimental: dxc-based work graph parsing (v2 spike)
+# Experimental: dxc-based work graph parsing (v2 spike) — CONCLUDED
 
-Temporary, throwaway setup for evaluating a v2 approach: instead of the current
-regex/paren-balance scan (see the root [`README.md`](../README.md)), ask
-`dxc` (the DirectX Shader Compiler) itself to parse and preprocess the HLSL,
+> **This spike succeeded and its code has since been ported into the published tool** as
+> `src/parse-dxil/` (the parser itself) and `src/setup-dxil/` (the dxc fetcher, formerly
+> `tools/fetch-dxc.*`/`extract-nupkg-entries.js` here). The scratch scripts that used to live under
+> `experimental/tools/` are gone; the fixture that used to live under `experimental/hlsl/` moved to
+> `fixtures/dxil-parser-fixture/`. Everything below is kept as **historical narrative** — the reasoning,
+> the dead ends, the verification steps that got the design to where it ended up — not as something you
+> need to read to use `parse-dxil`/`setup-dxil` today. See the root [`README.md`](../README.md) and
+> [`docs/ir-format.md`](../docs/ir-format.md) for the current, maintained docs.
+
+Originally: temporary, throwaway setup for evaluating a v2 approach: instead of the regex/paren-balance
+scan (`parse-source`), ask `dxc` (the DirectX Shader Compiler) itself to parse and preprocess the HLSL,
 and see how much of the work graph's structure it can hand back directly —
 especially the two things the regex scanner fundamentally can't do:
 
@@ -12,8 +20,9 @@ especially the two things the regex scanner fundamentally can't do:
   source text but are never actually compiled in for a given set of `-D`
   defines
 
-Nothing here is wired into the published tool (`src/`, `generate-workgraph-diagram.js`).
-This is scratch space for the spike only.
+The rest of this document describes the spike as it was at the time — file paths under `experimental/`
+it references (`tools/`, `hlsl/`, `examples-harness/`) no longer exist; see the banner above for where
+that functionality lives now.
 
 ## Layout
 
@@ -358,11 +367,9 @@ handling, `[NodeArraySize]`, `MaxRecordsSharedWith`, and so on).
 fixture. Ran it for real (native Windows) against
 [`examples/simple-pipeline`](../examples/simple-pipeline) and
 [`examples/mesh-culling`](../examples/mesh-culling) too, via harness compile
-units under `tools/../examples-harness/` (`SimplePipeline.hlsl`,
-`MeshCulling.hlsl` — `#include`ing the real node files to make one `lib_6_8`
-compile unit, since neither example ships one). `examples/` itself is
-**not modified** by this — see below for why mesh-culling needed a local
-copy instead of including it directly.
+units under `examples-harness/` (`SimplePipeline.hlsl`, `MeshCulling.hlsl`
+— `#include`ing the real node files directly to make one `lib_6_8` compile
+unit, since neither example ships one on its own).
 
 **`examples/simple-pipeline`**: compiled and parsed cleanly on the first
 try (all three node files live in one directory, so no path issues). Output
@@ -370,21 +377,27 @@ matched source exactly: launch modes, `NumThreads`, `NodeID` producer→consumer
 linkage (`EntryNode`→`GenerateNode`→`CollectNode`), record field names, and
 every doc comment.
 
-**`examples/mesh-culling`**: hit the *exact* `#pragma once` cross-directory
-dedup bug already found and fixed in the fixture (see "Findings" above) —
-`structs/Records.hlsl` is `#include`d from both `nodes-compute/` and
-`nodes-mesh/`, dxc doesn't dedupe the two differently-spelled relative
-paths, and the raw example fails with `redefinition of 'DispatchRecord'`.
-Confirms this isn't fixture-specific, it's a real dxc behavior any
-multi-directory node layout will hit. Rather than editing the published
-`examples/` tree, `examples-harness/mesh-culling/` holds a byte-identical
-copy of every node file plus one patched `structs/Records.hlsl` (same
-`#ifndef` guard fix as the fixture) — `examples-harness/MeshCulling.hlsl`
-includes those, not the originals. Once compiled, parsed cleanly: launch
-modes (including `mesh`), resolved `NumThreads` (from each node's own
-`#define`d thread-count constant), `DispatchGrid`/`MaxDispatchGrid`,
-`NodeID` linkage (`EntryNode`→`CullNode`→`RenderMeshNode`), record fields,
-and comments all matched source.
+**`examples/mesh-culling`**: initially hit the *exact* `#pragma once`
+cross-directory dedup bug already found and fixed in the fixture (see
+"Findings" above) — `structs/Records.hlsl` was `#include`d from both
+`nodes-compute/` and `nodes-mesh/`, dxc didn't dedupe the two
+differently-spelled relative paths, and the raw example failed with
+`redefinition of 'DispatchRecord'`. Confirmed this wasn't fixture-specific
+— any multi-directory node layout hits it. **Fixed at the source**: every
+`.hlsl` file under `examples/` (not just the one that hit the bug) was
+switched from `#pragma once` to `#ifndef`/`#define`/`#endif` include
+guards, matching the fixture's own convention — `structs/Records.hlsl`
+keeps the same explanatory comment the fixture's copy has, the rest got a
+plain mechanical swap. `examples-harness/MeshCulling.hlsl` now `#include`s
+the real example files directly (no local patched copy needed anymore —
+the one that used to live under `examples-harness/mesh-culling/` was
+deleted). Recompiled and reparsed clean: launch modes (including `mesh`),
+resolved `NumThreads` (from each node's own `#define`d thread-count
+constant), `DispatchGrid`/`MaxDispatchGrid`, `NodeID` linkage
+(`EntryNode`→`CullNode`→`RenderMeshNode`), record fields, and comments all
+still matched source — and v1's own regex scanner (`generate-workgraph-diagram.js`)
+was spot-checked against both examples post-fix too, unaffected (same node/edge/global
+counts as before).
 
 One more real finding from mesh-culling: `CullNode` calls
 `objects.GetDimensions(count, stride)` but never uses `count`/`stride`

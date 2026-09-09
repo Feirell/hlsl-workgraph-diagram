@@ -4,7 +4,8 @@
 // supervision - it was generated as prompted, code was not adjusted or
 // written. Review before relying on it.
 // ---------------------------------------------------------------------------
-#pragma once
+#ifndef MESH_CULLING_STRUCTS_GLOBALS_HLSL
+#define MESH_CULLING_STRUCTS_GLOBALS_HLSL
 
 struct ObjectData
 {
@@ -13,3 +14,5 @@ struct ObjectData
 };
 
 StructuredBuffer<ObjectData> objects : register(t0);
+
+#endif

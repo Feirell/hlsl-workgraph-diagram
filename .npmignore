@@ -1,6 +1,9 @@
 # Not needed to install/run the published CLI - kept in the repo, not the
 # npm package.
 examples/
+fixtures/
+experimental/
+docs/
 generate-workgraph-diagram.md
 
 # VCS / editor / OS cruft

@@ -1,3 +1,9 @@
+> **CONCLUDED — kept as historical record only.** This handoff's spike succeeded and was productionized:
+> see `src/parse-dxil/`, `src/setup-dxil/`, `docs/ir-format.md`, and the root `README.md`. The file paths
+> and "not done yet" items below describe the state as of the spike, before that port — most of the open
+> items here were resolved during it (real parity testing against `examples/`, the `--record-*-names` gap
+> confirmed and documented, node depth now computed in `build-puml`). Not maintained further.
+
 # Handoff: dxc-based Work Graph parsing spike (v2)
 
 Written for a fresh Claude Code session starting on the user's Windows box
@@ -166,11 +172,15 @@ Full detail + sources for every one of these is in `README.md`.
    `examples/simple-pipeline` and `examples/mesh-culling` parse cleanly via
    harness compile units under `examples-harness/` (`SimplePipeline.hlsl`,
    `MeshCulling.hlsl`) — see README.md's "Validated against the repo's real
-   examples" section for the friction hit (mesh-culling reproduces the
-   fixture's `#pragma once` dedup bug on the real files; a harness-local
-   patched copy works around it without touching `examples/`) and a new
-   finding (dxc DCEs an unused `GetDimensions` call entirely, so no
-   `!dx.resources` node exists for it — correct behavior, not a parser bug).
+   examples" section for a new finding (dxc DCEs an unused `GetDimensions`
+   call entirely, so no `!dx.resources` node exists for it — correct
+   behavior, not a parser bug). Mesh-culling initially hit the fixture's
+   `#pragma once` cross-directory dedup bug on the real files too — **also
+   fixed at the source this session**, on the user's explicit ask: every
+   `.hlsl` under `examples/` now uses `#ifndef`/`#define`/`#endif` guards
+   instead of `#pragma once` (same convention the fixture already used),
+   so `examples-harness/MeshCulling.hlsl` now `#include`s the real files
+   directly — no local patched copy needed anymore.
 2. ~~Add a `-Debug`/`--debug` flag to `run-dxc.ps1`/`.sh`~~ — **done**
    (`-EmbedDebug` / `--debug`), verified working this session. Was already
    implemented but uncommitted as of this handoff; still uncommitted now —

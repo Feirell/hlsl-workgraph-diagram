@@ -4,10 +4,13 @@
 // supervision - it was generated as prompted, code was not adjusted or
 // written. Review before relying on it.
 // ---------------------------------------------------------------------------
-#pragma once
+#ifndef MESH_CULLING_STRUCTS_VERTEXTYPES_HLSL
+#define MESH_CULLING_STRUCTS_VERTEXTYPES_HLSL
 
 struct Vertex
 {
     float4 position : SV_Position;
     float3 normal : NORMAL;
 };
+
+#endif
