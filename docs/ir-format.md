@@ -40,13 +40,36 @@ time an attribute reaches DXIL metadata dxc has already evaluated it as a real c
 This is *the* thing that makes `build-puml` parser-agnostic: `parse-source` used to resolve
 `#define`/`static const` values at *render* time, threading a constants table through the whole render
 tree. Resolution now happens once, at parse time (`parse-source/to-ir.js`, `parse-dxil/to-ir.js`), into
-this shape - `parse-dxil` has no constants table of its own (dxc already did the resolving), so a shared
-"resolved value + optional original text" shape is the only thing both parsers can produce identically.
+this shape - a shared "resolved value + optional original text" pair is the only thing both parsers need to
+produce identically for `build-puml` to render either one the same way.
 
-One deliberate behavior change from the pre-split tool: an *unresolved* compound expression (e.g.
-`intDivRUp(COUNT, 4)`) no longer gets per-identifier sub-annotation (`"COUNT (32)"` nested inside the still-
-unresolved call) - the IR only carries "resolved value, or original text" per whole field, not a table to
-re-walk at render time. The full original text is still shown, just not further annotated token-by-token.
+**`resolved` vs. `source`'s own per-identifier annotations are resolved differently, and it matters which is
+which.** `resolved` (the field's total) is always the *authoritative* number: `parse-dxil`'s comes straight
+from DXIL metadata (dxc's own compiled, canonical value - never recomputed by this tool); `parse-source`'s
+comes from this tool's own constants table. `source`, when it references a named constant, additionally has
+each identifier annotated with *its own* resolved value at parse time (e.g. `"VERT_SEG * HOR_SEG"` becomes
+`"VERT_SEG (6) * HOR_SEG (8)"` in the IR itself) via `annotateExpr()` (`../src/common/expr-resolve.js`) - this
+runs even when the expression as a whole doesn't resolve (an unresolved compound expression like
+`intDivRUp(COUNT, 4)` still comes back as `"intDivRUp(COUNT (32), 4)"` if `COUNT` itself is known, `resolved:
+null` regardless). Both parsers do this identically now, each with its *own* constants table:
+`parse-source/constants.js` scans `#define`/`static const` across the whole scanned directory tree off disk;
+`parse-dxil/constants.js` scans the same declarations out of every file dxc embedded verbatim in
+`dx.source.contents` debug info (not just the file containing the node function - a constant declared in a
+shared `utilities/`-style file still resolves).
+
+This per-identifier annotation is scalar-only (`toScalarField`/`buildScalarField`) - the triple shape's
+per-axis `source` text (`numThreads`/`dispatchGrid`/`maxDispatchGrid`) is still the plain, un-annotated
+original text for both parsers, e.g. `"COLLECT_THREADS"` rather than `"COLLECT_THREADS (32)"`. Not a gap so
+much as untouched: nothing has needed it there yet.
+
+The distinction that matters for trusting a value: `resolved` is always compiler-derived for `parse-dxil`.
+The per-identifier annotations baked into `source` are **not** - `#define`s leave no trace in any compiled
+artifact (the preprocessor consumes them before the compiler frontend ever runs), so there's no "6" for
+`VERT_SEG` sitting anywhere in the DXIL container to read back. `parse-dxil/constants.js` re-implements a
+small `#define`/`static const` scanner and arithmetic evaluator against dxc's embedded *pre-preprocessor*
+source text instead - the same category of computation `parse-source` uses for everything, just narrower in
+scope here (decorating identifiers, not computing the field's own total, which stays compiler-derived either
+way).
 
 ## Node
 
