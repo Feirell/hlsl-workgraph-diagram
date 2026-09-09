@@ -25,18 +25,24 @@ const {
     findGlobalsUsed,
 } = require('./dxil-metadata');
 const { extractOriginalAttrs } = require('./original-attrs');
+const { collectConstants, annotateExpr } = require('./constants');
 
 // A scalar { resolved, source } pair. `resolvedVal` is `undefined` when the
 // DXIL metadata never carried this tag at all (attribute absent) -
 // `null`/other falsy resolved values (e.g. maxRecursionDepth: 0) must stay
 // distinguishable from that, hence the explicit undefined/null check rather
-// than a truthiness check.
-function buildScalarField(resolvedVal, originalText) {
+// than a truthiness check. `resolvedVal` itself always comes from the DXIL
+// metadata (dxc's own compiled, canonical total) - `table` is only used to
+// annotate `originalText`'s own identifiers with their individual values
+// (see ../common/expr-resolve.js's annotateExpr), not to recompute the
+// total independently.
+function buildScalarField(resolvedVal, originalText, table = new Map()) {
     if (resolvedVal === undefined || resolvedVal === null) {
         return originalText != null ? { resolved: null, source: originalText } : null;
     }
     const same = originalText != null && originalText.replace(/\s+/g, '') === String(resolvedVal);
-    return { resolved: resolvedVal, source: same ? null : originalText || null };
+    if (same) return { resolved: resolvedVal, source: null };
+    return { resolved: resolvedVal, source: originalText != null ? annotateExpr(originalText, table) : null };
 }
 
 // A triple { resolved: [...], source: [...] } pair, splitting the original
@@ -77,6 +83,7 @@ function buildIr(dis, resolveId, generatorDetail) {
     const subprogramsByName = getSubprogramsByFunctionName(resolveId, dis.named);
     const sourceFiles = getSourceFiles(resolveId, dis.named);
     const resources = getResources(resolveId, dis.named, dis.text);
+    const constantsTable = collectConstants(sourceFiles);
 
     const nodes = [];
     for (const id of dis.named.get('dx.entryPoints') || []) {
@@ -120,7 +127,7 @@ function buildIr(dis, resolveId, generatorDetail) {
                 // MaxRecords, via original-attrs.js's extractParamVarName().
                 varName: varName || null,
                 linkedNodeID: rec.linkedNodeID || null,
-                maxRecords: buildScalarField(rec.maxRecords, originalMaxRecords),
+                maxRecords: buildScalarField(rec.maxRecords, originalMaxRecords, constantsTable),
                 maxRecordsSharedWith: null, // DXIL tag unverified against a real compile - see docs/ir-format.md
                 recordFields: debugParam ? debugParam.recordFields : null,
             };
@@ -139,7 +146,7 @@ function buildIr(dis, resolveId, generatorDetail) {
             numThreads: buildTripleField(props.numThreads, nl.numThreads),
             dispatchGrid: buildTripleField(props.dispatchGrid, nl.dispatchGrid),
             maxDispatchGrid: buildTripleField(props.maxDispatchGrid, nl.maxDispatchGrid),
-            maxRecursionDepth: buildScalarField(props.maxRecursionDepth, nl.maxRecursionDepth),
+            maxRecursionDepth: buildScalarField(props.maxRecursionDepth, nl.maxRecursionDepth, constantsTable),
             outputTopology: null, // not currently parsed from this metadata - see docs/ir-format.md
             inputs: (props.inputs || []).map((rec, i) => toParam(rec, i, 0)),
             outputs: (props.outputs || []).map((rec, i) => toParam(rec, i, numInputs)),

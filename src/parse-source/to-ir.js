@@ -19,17 +19,21 @@
 // only thing both can produce.
 // ---------------------------------------------------------------------------
 
-const { resolveExpr } = require('./constants');
+const { resolveExpr, annotateExpr } = require('./constants');
 
 // A single un-evaluated expression -> { resolved, source }. `source` is
 // dropped (set null) whenever it would just repeat the resolved literal -
-// nothing more to show than the number already in `resolved`.
+// nothing more to show than the number already in `resolved` - and
+// otherwise has each of its own identifiers (if any) annotated with their
+// individual resolved values (e.g. "VERT_SEG * HOR_SEG" -> "VERT_SEG (6) *
+// HOR_SEG (8)"), so a multi-factor expression's display doesn't conflate
+// one factor's value with the whole product - see build-puml/node-label.js.
 function toScalarField(rawExpr, table) {
     if (rawExpr == null) return null;
     const trimmed = rawExpr.trim();
     const resolved = resolveExpr(trimmed, table);
     const sameAsResolved = resolved !== null && trimmed.replace(/\s+/g, '') === String(resolved);
-    return { resolved, source: sameAsResolved ? null : trimmed };
+    return { resolved, source: sameAsResolved ? null : annotateExpr(trimmed, table) };
 }
 
 // A comma-separated triple (NumThreads/NodeDispatchGrid/NodeMaxDispatchGrid

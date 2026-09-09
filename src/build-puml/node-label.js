@@ -56,39 +56,37 @@ function tripleTotalSuffix(field) {
     return ` = ${field.resolved.reduce((a, b) => a * b, 1)}`;
 }
 
-// Whether an expression's source text is pure arithmetic on literals (only
-// digits/operators/whitespace, e.g. "1 * 32") rather than referencing a
-// named constant (e.g. "1 * NUM_THREADS"). Guards the "(resolved)"
-// annotation below: a literal-only expression's value is already legible
-// from the expression itself, so appending its resolved value in parens
-// (e.g. "1 * 32 (32)") just repeats a number that's already sitting right
-// there, whereas for an identifier the resolved value is the only place
-// its actual number shows up.
-function isLiteralExpr(text) {
-    return /^[\d\s+\-*/%.,()]+$/.test(text);
+// Strips the per-identifier "(n)" annotations parse-source's and
+// parse-dxil's own constants.js (via ../common/expr-resolve.js's
+// annotateExpr) already baked into `source` - e.g. "VERT_SEG (6) *
+// HOR_SEG (8)" -> "VERT_SEG * HOR_SEG" - recovering the bare expression
+// shape for the classification below. Never used for display, only to
+// decide whether the " = <total>" suffix would be redundant.
+function stripValueAnnotations(text) {
+    return text.replace(/\s*\(\s*-?\d+(?:\.\d+)?\s*\)/g, '');
 }
 
-// Whether an expression trivially multiplies by literal 1 (e.g. "1 * 32" or
-// "COUNT * 1") - the common "one record per thread" idiom. Its resolved
-// value is always just the other operand, already visible in the source,
-// so the " = <value>" total suffix below is skipped for it even when the
-// other operand is an identifier (whose resolved value is otherwise worth
-// showing via the "(resolved)" annotation).
-function isTrivialIdentityMultiply(text) {
-    const s = text.replace(/\s+/g, '');
-    return /^1\*.+$/.test(s) || /^.+\*1$/.test(s);
+// Whether a (de-annotated) expression unambiguously names a single value
+// already equal to the field's resolved total: a bare identifier/literal,
+// or a "1 * x" / "x * 1" identity multiply (literal or identifier operand -
+// either way the product trivially equals the other operand, whose own
+// value - if it's an identifier - is already visible via its own "(n)"
+// annotation in `source`). A genuine multi-factor product (e.g. "VERT_SEG *
+// HOR_SEG") fails this - its total isn't any single factor's own value, so
+// it does need spelling out via the suffix.
+function isTrivialSingleValue(skeleton) {
+    if (/^[A-Za-z_]\w*$/.test(skeleton) || /^\d+(?:\.\d+)?$/.test(skeleton)) return true;
+    const factors = skeleton.split('*').map((s) => s.trim());
+    return factors.length === 2 && (factors[0] === '1' || factors[1] === '1');
 }
 
-// A scalar field's plain display text - the original text with the
-// resolved value in parens when there is original text to show and that
-// text isn't itself a literal-only expression (see isLiteralExpr above),
-// else just the resolved number (or "?").
+// A scalar field's plain display text - `source` as-is (already annotated
+// per-identifier at parse time, where applicable - see toScalarField/
+// buildScalarField), falling back to "(?)" only when the field never
+// resolved at all.
 function formatScalarInline(field) {
     if (!field) return '?';
-    if (field.source != null) {
-        if (field.resolved == null) return `${field.source} (?)`;
-        return isLiteralExpr(field.source) ? field.source : `${field.source} (${field.resolved})`;
-    }
+    if (field.source != null) return field.resolved != null ? field.source : `${field.source} (?)`;
     return field.resolved != null ? String(field.resolved) : '?';
 }
 
@@ -105,14 +103,14 @@ function scalarBraces(field, short) {
 }
 
 // Skipped when there's no original text to simplify (a bare literal), the
-// expression didn't resolve, or the expression is a trivial "1 * x" / "x *
-// 1" identity multiply (see isTrivialIdentityMultiply above) - its value is
-// already visible in the source (and, for an identifier operand, already
-// shown via formatScalarInline's "(resolved)" annotation), so restating it
-// again here would be redundant.
+// expression didn't resolve, or - once its "(n)" annotations are stripped
+// back out - it reduces to a single already-visible value (see
+// isTrivialSingleValue above). Shown for a genuine multi-factor product
+// (e.g. "VERT_SEG (6) * HOR_SEG (8)"), since its total isn't otherwise
+// visible anywhere in `source`.
 function scalarTotalSuffix(field) {
     if (!field || field.source == null || field.resolved == null) return '';
-    if (isTrivialIdentityMultiply(field.source)) return '';
+    if (isTrivialSingleValue(stripValueAnnotations(field.source))) return '';
     return ` = ${field.resolved}`;
 }
 
