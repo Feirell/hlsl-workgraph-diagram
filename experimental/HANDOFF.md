@@ -161,22 +161,36 @@ Full detail + sources for every one of these is in `README.md`.
 
 ## Not done yet — natural next steps, roughly in order
 
-1. **`parse-workgraph.js` has never been run against the repo's real
-   examples** (`examples/simple-pipeline/`, `examples/mesh-culling/`) —
-   only against the `experimental/hlsl` fixture. This is the obvious next
-   validation step and should be easy now: point `fetch-dxc.ps1`/
-   `run-dxc.ps1` (or a raw `dxc` call) at one of those directories instead,
-   then run the parser against the result. Expect friction — those
-   examples weren't authored with a real compile in mind, the way this
-   fixture was iterated against actual dxc errors.
-2. Add a `-Debug`/`--debug` flag to `run-dxc.ps1`/`.sh` so
-   `-Zi -Qembed_debug` doesn't need to be typed by hand (see above).
-3. Un-evaluated original expressions (e.g. showing `32 * SOME_CONSTANT`
-   next to its resolved value) — the data path is proven (same
-   `dx.source.contents` mechanism as comments) but `parse-workgraph.js`
-   doesn't extract/display it yet. Needs: locate the attribute's original
-   text near the function's known line, alongside the resolved value
-   already in hand.
+1. ~~`parse-workgraph.js` has never been run against the repo's real
+   examples~~ — **done**, on the Windows box, this session. Both
+   `examples/simple-pipeline` and `examples/mesh-culling` parse cleanly via
+   harness compile units under `examples-harness/` (`SimplePipeline.hlsl`,
+   `MeshCulling.hlsl`) — see README.md's "Validated against the repo's real
+   examples" section for the friction hit (mesh-culling reproduces the
+   fixture's `#pragma once` dedup bug on the real files; a harness-local
+   patched copy works around it without touching `examples/`) and a new
+   finding (dxc DCEs an unused `GetDimensions` call entirely, so no
+   `!dx.resources` node exists for it — correct behavior, not a parser bug).
+2. ~~Add a `-Debug`/`--debug` flag to `run-dxc.ps1`/`.sh`~~ — **done**
+   (`-EmbedDebug` / `--debug`), verified working this session. Was already
+   implemented but uncommitted as of this handoff; still uncommitted now —
+   check `git status` before assuming it's landed.
+3. ~~Un-evaluated original expressions~~ — **done**, this session. See
+   README.md's "Original (un-evaluated) attribute expressions" section.
+   `numThreadsOriginal`/`dispatchGridOriginal`/`maxDispatchGridOriginal`/
+   `maxRecordsOriginal` fields, shown in the CLI output as `[source: ...]`
+   only when they differ from the resolved value.
+3.5. **New this session**: a full feature-parity check of `parse-workgraph.js`
+   against everything the root README promises/documents as limitations —
+   see README.md's "Feature-parity check against the published tool (v1)"
+   section. Headline: node depth (longest-path-from-entry) and PlantUML
+   rendering itself are recreatable but not yet built (no blocking dxc
+   issue, just not done); `--record-in-names`/`--record-out-names` (a
+   record parameter's own HLSL variable name) is a **genuine gap** — dxc's
+   debug info has zero `DW_TAG_arg_variable` entries for node function
+   parameters, only `DW_TAG_auto_variable` for in-body locals, so parameter
+   names don't survive into the `DISubprogram`/`DISubroutineType` data this
+   tool already reads. No workaround found or tried yet.
 4. Not exercised at all yet: `[NodeArraySize]` / multi-node arrays,
    `MaxRecordsSharedWith`, `NodeShareInputOf` (tag `17` is in the table but
    the fixture never triggers it), and a closer look at mesh-shader output

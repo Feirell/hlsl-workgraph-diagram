@@ -31,6 +31,14 @@
 #     (!dx.entryPoints etc.) describe every compiled node's launch
 #     mode/records/dispatch grid as dxc actually resolved them.
 #   both (default): both of the above.
+# -EmbedDebug: adds `-Zi -Qembed_debug` to the compile step, embedding the
+#   original per-file pre-preprocessor source (comments, un-expanded macro
+#   names, #if-0-dead code) into the compiled container, addressable via
+#   !DISubprogram's (file, line) - see ../README.md. Only affects `compile`/
+#   `both` mode; ignored for `preprocess`. Named -EmbedDebug rather than
+#   -Debug because [CmdletBinding()] already reserves -Debug as a common
+#   parameter. Output files get a `.debug.` infix when set, so debug and
+#   non-debug compiles of the same source don't clobber each other.
 #
 # SourceFile defaults to experimental/hlsl/WorkGraph.hlsl.
 # Anything after a literal `--` is passed through to dxc verbatim.
@@ -43,6 +51,7 @@ param(
     [string[]]$Define = @(),
     [ValidateSet('preprocess', 'compile', 'both')]
     [string]$Mode = 'both',
+    [switch]$EmbedDebug,
     [string]$OutDir,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$ExtraArgs
@@ -110,9 +119,12 @@ if ($Mode -eq 'preprocess' -or $Mode -eq 'both') {
 }
 
 if ($Mode -eq 'compile' -or $Mode -eq 'both') {
-    $dxilOut = Join-Path $OutDir "$stem.dxil"
-    $asmOut = Join-Path $OutDir "$stem.dis.ll"
-    Invoke-Dxc -DxcArgs (@('-T', $TargetProfile) + $entryArgs + $defineArgs + $validatorArgs +
+    $compileStem = if ($EmbedDebug) { "$stem.debug" } else { $stem }
+    $debugArgs = @()
+    if ($EmbedDebug) { $debugArgs = @('-Zi', '-Qembed_debug') }
+    $dxilOut = Join-Path $OutDir "$compileStem.dxil"
+    $asmOut = Join-Path $OutDir "$compileStem.dis.ll"
+    Invoke-Dxc -DxcArgs (@('-T', $TargetProfile) + $entryArgs + $defineArgs + $debugArgs + $validatorArgs +
         @('-Fo', $dxilOut, '-Fc', $asmOut, $SourceFile) + $ExtraArgs)
     Write-Host "compiled container: $dxilOut"
     Write-Host "disassembly:        $asmOut"

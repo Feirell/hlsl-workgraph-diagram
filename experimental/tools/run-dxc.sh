@@ -39,6 +39,15 @@
 #                           node's launch mode/records/dispatch grid as dxc
 #                           actually resolved them, which is the main thing
 #                           worth comparing against the regex scanner.
+#   --debug             Adds `-Zi -Qembed_debug` to the compile step,
+#                       embedding the original per-file pre-preprocessor
+#                       source (comments, un-expanded macro names, #if-0
+#                       dead code) into the compiled container, addressable
+#                       via !DISubprogram's (file, line) — see ../README.md.
+#                       Only affects compile/both mode; ignored for
+#                       preprocess. Output files get a `.debug.` infix when
+#                       set, so debug and non-debug compiles of the same
+#                       source don't clobber each other.
 #   --out-dir DIR       Where to write outputs. Default: experimental/out.
 #
 # sourceFile defaults to experimental/hlsl/WorkGraph.hlsl.
@@ -52,6 +61,7 @@ EXPERIMENTAL_DIR="$(dirname "$SCRIPT_DIR")"
 
 profile="lib_6_8"
 mode="both"
+embed_debug=0
 out_dir="$EXPERIMENTAL_DIR/out"
 source_file=""
 entries=()
@@ -64,9 +74,10 @@ while [ $# -gt 0 ]; do
         --profile) profile="$2"; shift 2 ;;
         --define) defines+=("$2"); shift 2 ;;
         --mode) mode="$2"; shift 2 ;;
+        --debug) embed_debug=1; shift ;;
         --out-dir) out_dir="$2"; shift 2 ;;
         --) shift; extra_args+=("$@"); break ;;
-        -h|--help) sed -n '2,47p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)
             if [ -n "$source_file" ]; then
                 echo "unexpected extra argument: $1 (source file already set to $source_file)" >&2
@@ -142,6 +153,9 @@ fi
 validator_args=()
 [ -f "$dxc_dir/dxil.dll" ] || validator_args=("-Vd")
 
+debug_args=()
+[ "$embed_debug" -eq 1 ] && debug_args=("-Zi" "-Qembed_debug")
+
 run_dxc() {
     echo "+ dxc $*" >&2
     if [ ${#runner[@]} -gt 0 ]; then
@@ -158,11 +172,14 @@ if [ "$mode" = "preprocess" ] || [ "$mode" = "both" ]; then
 fi
 
 if [ "$mode" = "compile" ] || [ "$mode" = "both" ]; then
-    dxil_out="$out_dir/$stem.dxil"
-    asm_out="$out_dir/$stem.dis.ll"
+    compile_stem="$stem"
+    [ "$embed_debug" -eq 1 ] && compile_stem="$stem.debug"
+    dxil_out="$out_dir/$compile_stem.dxil"
+    asm_out="$out_dir/$compile_stem.dis.ll"
     run_dxc -T "$profile" \
         "${entry_args[@]}" \
         "${define_args[@]}" \
+        "${debug_args[@]}" \
         "${validator_args[@]}" \
         -Fo "$(to_win_path "$dxil_out")" \
         -Fc "$(to_win_path "$asm_out")" \

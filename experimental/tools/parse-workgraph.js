@@ -18,7 +18,12 @@
 //     from `-Zi -Qembed_debug`): each node's defining (file, line), the
 //     record types' real names and field lists, and the original — comments
 //     and all — per-file source text, used to recover a node's doc comment
-//     and (best-effort) its original unevaluated attribute expressions.
+//     and its original unevaluated attribute expressions (e.g. `NumThreads:
+//     (32, 1, 1)` alongside the original `[NumThreads(COLLECT_THREADS, 1,
+//     1)]` text) for NumThreads/NodeDispatchGrid/NodeMaxDispatchGrid and
+//     each I/O parameter's MaxRecords — a plain balanced-paren text
+//     extraction from the pre-preprocessor source, not a resolver of its
+//     own; the resolved value always comes from the DXIL metadata.
 //
 // Global-resource-usage extraction (`!dx.resources` + per-node
 // `createHandleForLib` calls) is present but UNVERIFIED — this repo's
@@ -265,6 +270,131 @@ function extractLeadingComment(fileContent, functionLine) {
 }
 
 // ---------------------------------------------------------------------------
+// Original (un-evaluated) attribute expressions: dxc's metadata gives only
+// the resolved value (e.g. NumThreads(32,1,1)) — not the original
+// `[NumThreads(COLLECT_THREADS, 1, 1)]` text with the identifier still
+// unexpanded. Recovered from the same dx.source.contents pre-preprocessor
+// text extractLeadingComment() already uses: walk the leading `[...]`
+// attribute block above a node function for its own attributes
+// (NumThreads/NodeDispatchGrid/NodeMaxDispatchGrid), and the parameter
+// list for each I/O parameter's MaxRecords. Pure text extraction — no
+// evaluation, the resolved value always comes from the DXIL metadata
+// already parsed elsewhere.
+// ---------------------------------------------------------------------------
+
+// Same block extractLeadingComment() walks past without capturing — the
+// contiguous `[...]` lines immediately above functionLine (1-based),
+// joined with newlines so a multi-line attribute (e.g. spanning two
+// `[...]` lines) still reads as one block for extractAttrArgs() to scan.
+function extractLeadingAttributeBlock(fileContent, functionLine) {
+    const lines = fileContent.split('\n');
+    let i = functionLine - 1 - 1;
+    const collected = [];
+    while (i >= 0 && /^\s*\[.*\]\s*$/.test(lines[i])) {
+        collected.unshift(lines[i]);
+        i--;
+    }
+    return collected.join('\n');
+}
+
+// Finds `[AttrName(...)]` in `text` and returns its argument text verbatim
+// (not evaluated), or null if the attribute isn't present. Balanced-paren
+// rather than a naive non-greedy regex, since an argument can itself
+// contain parens (e.g. `32 * (CUBOID_FACES + 1)`).
+function extractAttrArgs(text, attrName) {
+    const marker = `[${attrName}(`;
+    const start = text.indexOf(marker);
+    if (start === -1) return null;
+    let i = start + marker.length;
+    let depth = 1;
+    const argStart = i;
+    while (i < text.length && depth > 0) {
+        if (text[i] === '(') depth++;
+        else if (text[i] === ')') depth--;
+        i++;
+    }
+    if (depth !== 0) return null;
+    return text.slice(argStart, i - 1).trim();
+}
+
+// The function's full parameter-list text, parens included — from the `(`
+// on functionLine (the DISubprogram line, which points at `void
+// FuncName(`) through its balanced-paren close, however many lines that
+// spans. Absolute-offset character scan, same style as splitTopLevel.
+function extractParamListText(fileContent, functionLine) {
+    const lines = fileContent.split('\n');
+    let offset = 0;
+    for (let i = 0; i < functionLine - 1; i++) offset += lines[i].length + 1; // +1 for the '\n' split away
+    const funcLineText = lines[functionLine - 1] || '';
+    const openRel = funcLineText.indexOf('(');
+    if (openRel === -1) return '';
+    const openAbs = offset + openRel;
+    let depth = 0;
+    let i = openAbs;
+    for (; i < fileContent.length; i++) {
+        const c = fileContent[i];
+        if (c === '(') depth++;
+        else if (c === ')') {
+            depth--;
+            if (depth === 0) {
+                i++;
+                break;
+            }
+        }
+    }
+    return fileContent.slice(openAbs, i);
+}
+
+// Splits a parameter-list's inner text (outer parens already stripped) by
+// top-level commas — like splitTopLevel, but also tracks `<>`/`[]` depth
+// (template args, attribute brackets) alongside `()`, since parameter
+// declarations carry both and splitTopLevel only tracks `(){}`.
+function splitParamsTopLevel(s) {
+    const parts = [];
+    let depth = 0;
+    let cur = '';
+    for (let i = 0; i < s.length; i++) {
+        const c = s[i];
+        if ('([<'.includes(c)) depth++;
+        if (')]>'.includes(c)) depth--;
+        if (c === ',' && depth === 0) {
+            parts.push(cur.trim());
+            cur = '';
+            continue;
+        }
+        cur += c;
+    }
+    if (cur.trim().length) parts.push(cur.trim());
+    return parts;
+}
+
+// Recovers a node's original, unevaluated attribute expressions: its own
+// NumThreads/NodeDispatchGrid/NodeMaxDispatchGrid, and each I/O
+// parameter's MaxRecords, in declaration order (so callers can zip against
+// props.inputs/outputs the same way debugInfo.params already is).
+function extractOriginalAttrs(fileContent, functionLine) {
+    const attrBlock = extractLeadingAttributeBlock(fileContent, functionLine);
+    const nodeLevel = {
+        numThreads: extractAttrArgs(attrBlock, 'NumThreads'),
+        dispatchGrid: extractAttrArgs(attrBlock, 'NodeDispatchGrid'),
+        maxDispatchGrid: extractAttrArgs(attrBlock, 'NodeMaxDispatchGrid'),
+    };
+    const paramListText = extractParamListText(fileContent, functionLine);
+    const inner = paramListText.startsWith('(') && paramListText.endsWith(')') ? paramListText.slice(1, -1) : paramListText;
+    const ioParamChunks = splitParamsTopLevel(inner).filter((chunk) => NODE_IO_KIND_PATTERN.test(chunk));
+    const ioMaxRecords = ioParamChunks.map((chunk) => extractAttrArgs(chunk, 'MaxRecords'));
+    return { nodeLevel, ioMaxRecords };
+}
+
+// True when the original attribute text is worth showing alongside the
+// resolved value — i.e. it isn't just the same literal reformatted
+// (whitespace-insensitive), which would add noise for no information.
+function originalExprDiffers(originalText, resolvedDisplay) {
+    if (originalText == null) return false;
+    return originalText.replace(/\s+/g, '') !== String(resolvedDisplay).replace(/\s+/g, '');
+}
+
+// ---------------------------------------------------------------------------
 // High-level extraction
 // ---------------------------------------------------------------------------
 
@@ -328,6 +458,14 @@ const NODE_IO_KINDS = new Set([
     'EmptyNodeOutputArray',
     'EmptyNodeOutput',
 ]);
+
+// Matches NODE_IO_KINDS' vocabulary as a whole-word regex, to pick out
+// which raw parameter-list chunks (from extractOriginalAttrs() above) are
+// actual node I/O, as opposed to system-value scalars like `uint gtid` or
+// mesh output arrays — same filter describeParams() applies to the
+// debug-info parameter list below, kept in sync so the two stay
+// positionally zippable against each other.
+const NODE_IO_KIND_PATTERN = new RegExp(`\\b(${[...NODE_IO_KINDS].join('|')})\\b`);
 
 // Walks a DISubroutineType's `types` list (element 0 is the return type,
 // always null for these — node functions return void) to recover each
@@ -459,24 +597,44 @@ function buildGraph(dis) {
         const debugInfo = subprogramsByName.get(funcName);
 
         let comment = null;
+        let originalAttrs = null;
         if (debugInfo && debugInfo.file && debugInfo.line) {
             const content = sourceFiles.get(normalizePath(debugInfo.file));
-            if (content) comment = extractLeadingComment(content, debugInfo.line);
+            if (content) {
+                comment = extractLeadingComment(content, debugInfo.line);
+                originalAttrs = extractOriginalAttrs(content, debugInfo.line);
+            }
         }
 
+        const numThreads = props.numThreads || null;
+        const dispatchGrid = props.dispatchGrid || null;
+        const maxDispatchGrid = props.maxDispatchGrid || null;
+        const nl = originalAttrs ? originalAttrs.nodeLevel : {};
+
+        const numInputs = (props.inputs || []).length;
         nodes.push({
             name: funcName,
             launchMode: props.nodeLaunchType || null,
             isProgramEntry: !!props.isProgramEntry,
-            numThreads: props.numThreads || null,
-            dispatchGrid: props.dispatchGrid || null,
-            maxDispatchGrid: props.maxDispatchGrid || null,
+            numThreads,
+            numThreadsOriginal: originalExprDiffers(nl.numThreads, numThreads && numThreads.join(', ')) ? nl.numThreads : null,
+            dispatchGrid,
+            dispatchGridOriginal: originalExprDiffers(nl.dispatchGrid, dispatchGrid && dispatchGrid.join(', ')) ? nl.dispatchGrid : null,
+            maxDispatchGrid,
+            maxDispatchGridOriginal: originalExprDiffers(nl.maxDispatchGrid, maxDispatchGrid && maxDispatchGrid.join(', ')) ? nl.maxDispatchGrid : null,
             nodeID: props.nodeID || null,
-            inputs: (props.inputs || []).map((rec, i) => ({ ...rec, ...(debugInfo && debugInfo.params[i]) })),
-            outputs: (props.outputs || []).map((rec, i) => ({
-                ...rec,
-                ...(debugInfo && debugInfo.params[(props.inputs || []).length + i]),
-            })),
+            inputs: (props.inputs || []).map((rec, i) => {
+                const merged = { ...rec, ...(debugInfo && debugInfo.params[i]) };
+                const original = originalAttrs ? originalAttrs.ioMaxRecords[i] : null;
+                merged.maxRecordsOriginal = originalExprDiffers(original, merged.maxRecords) ? original : null;
+                return merged;
+            }),
+            outputs: (props.outputs || []).map((rec, i) => {
+                const merged = { ...rec, ...(debugInfo && debugInfo.params[numInputs + i]) };
+                const original = originalAttrs ? originalAttrs.ioMaxRecords[numInputs + i] : null;
+                merged.maxRecordsOriginal = originalExprDiffers(original, merged.maxRecords) ? original : null;
+                return merged;
+            }),
             sourceFile: debugInfo ? debugInfo.file : null,
             sourceLine: debugInfo ? debugInfo.line : null,
             comment,
@@ -510,15 +668,18 @@ function main() {
         console.log(`\n${node.name}  (${node.launchMode ? node.launchMode.label : 'unknown'}${node.isProgramEntry ? ', entry' : ''})`);
         if (node.comment) console.log(`  # ${node.comment.split('\n').join('\n  # ')}`);
         console.log(`  source: ${node.sourceFile}:${node.sourceLine}`);
-        if (node.numThreads) console.log(`  NumThreads: (${node.numThreads.join(', ')})`);
-        if (node.dispatchGrid) console.log(`  DispatchGrid: (${node.dispatchGrid.join(', ')})`);
-        if (node.maxDispatchGrid) console.log(`  MaxDispatchGrid: (${node.maxDispatchGrid.join(', ')})`);
+        const orig = (v) => (v != null ? `  [source: ${v}]` : '');
+        if (node.numThreads) console.log(`  NumThreads: (${node.numThreads.join(', ')})${orig(node.numThreadsOriginal)}`);
+        if (node.dispatchGrid) console.log(`  DispatchGrid: (${node.dispatchGrid.join(', ')})${orig(node.dispatchGridOriginal)}`);
+        if (node.maxDispatchGrid) console.log(`  MaxDispatchGrid: (${node.maxDispatchGrid.join(', ')})${orig(node.maxDispatchGridOriginal)}`);
         for (const inp of node.inputs) {
-            console.log(`  in:  ${inp.paramKind}<${inp.recordType}>${inp.maxRecords != null ? ` maxRecords=${inp.maxRecords}` : ''}`);
+            console.log(
+                `  in:  ${inp.paramKind}<${inp.recordType}>${inp.maxRecords != null ? ` maxRecords=${inp.maxRecords}` : ''}${orig(inp.maxRecordsOriginal)}`
+            );
         }
         for (const out of node.outputs) {
             const link = out.linkedNodeID ? ` -> ${out.linkedNodeID.name}[${out.linkedNodeID.index}]` : '';
-            console.log(`  out: ${out.paramKind}<${out.recordType}> maxRecords=${out.maxRecords}${link}`);
+            console.log(`  out: ${out.paramKind}<${out.recordType}> maxRecords=${out.maxRecords}${orig(out.maxRecordsOriginal)}${link}`);
         }
         if (node.globalsUsed.length) console.log(`  globals: ${node.globalsUsed.join(', ')}`);
     }

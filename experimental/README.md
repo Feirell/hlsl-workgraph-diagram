@@ -307,6 +307,23 @@ source exactly, including correctly filtering out non-node-I/O parameters
 (`uint gtid`/`dtid` system values) that would otherwise misalign the
 positional zip against `!dx.entryPoints`' inputs/outputs lists.
 
+**Original (un-evaluated) attribute expressions — now implemented and
+verified.** `parse-workgraph.js` recovers each node's own
+`NumThreads`/`NodeDispatchGrid`/`NodeMaxDispatchGrid` text and every I/O
+parameter's `MaxRecords` text from the same `dx.source.contents` used for
+comments — a plain balanced-paren extraction (`extractOriginalAttrs()`),
+not a resolver; the resolved value always comes from the DXIL metadata as
+before. Shown only when it differs (whitespace-insensitive) from the
+resolved value, to avoid noise for a plain literal. Verified against all
+three of the fixture's built-in test cases for this
+(`[NumThreads(COLLECT_THREADS, 1, 1)]` → `NumThreads: (32, 1, 1)  [source:
+COLLECT_THREADS, 1, 1]`; `[MaxRecords(ENTRY_MAX_RECORDS)]` → `maxRecords=64
+[source: ENTRY_MAX_RECORDS]`; `RenderMeshNode`'s `RMN_THREADS`) and against
+both real examples' own `#define`d thread-count constants
+(`CULL_THREADS`/`COLLECT_THREADS`/`RMN_THREADS` again, from the harnesses
+above) — matches source exactly, and a plain-literal attribute (`DispatchGrid:
+(1, 1, 1)`, `[MaxRecords(64)]`) correctly stays quiet.
+
 **Global-resource-usage extraction — now also verified**, after adding one
 global to the fixture (`structs/Globals.hlsl`, an `itemMeta`
 `StructuredBuffer` read by `EntryNode`, mirroring `examples/mesh-culling`'s
@@ -332,6 +349,142 @@ native helper, no D3D12 device, and no dependency beyond Node itself. That
 script is a working proof of concept, not a finished v2 — see its own
 header comment for what's simplified (e.g. `recordLayoutRaw`/`ioFlagsRaw`
 are carried through unparsed, since debug info already gives the same
-information by name) versus what a real v2 would need (running against
-`examples/simple-pipeline` and `examples/mesh-culling`, multi-node-array
+information by name) versus what a real v2 would need (multi-node-array
 handling, `[NodeArraySize]`, `MaxRecordsSharedWith`, and so on).
+
+## Validated against the repo's real examples
+
+`parse-workgraph.js` had only ever been run against the `experimental/hlsl`
+fixture. Ran it for real (native Windows) against
+[`examples/simple-pipeline`](../examples/simple-pipeline) and
+[`examples/mesh-culling`](../examples/mesh-culling) too, via harness compile
+units under `tools/../examples-harness/` (`SimplePipeline.hlsl`,
+`MeshCulling.hlsl` — `#include`ing the real node files to make one `lib_6_8`
+compile unit, since neither example ships one). `examples/` itself is
+**not modified** by this — see below for why mesh-culling needed a local
+copy instead of including it directly.
+
+**`examples/simple-pipeline`**: compiled and parsed cleanly on the first
+try (all three node files live in one directory, so no path issues). Output
+matched source exactly: launch modes, `NumThreads`, `NodeID` producer→consumer
+linkage (`EntryNode`→`GenerateNode`→`CollectNode`), record field names, and
+every doc comment.
+
+**`examples/mesh-culling`**: hit the *exact* `#pragma once` cross-directory
+dedup bug already found and fixed in the fixture (see "Findings" above) —
+`structs/Records.hlsl` is `#include`d from both `nodes-compute/` and
+`nodes-mesh/`, dxc doesn't dedupe the two differently-spelled relative
+paths, and the raw example fails with `redefinition of 'DispatchRecord'`.
+Confirms this isn't fixture-specific, it's a real dxc behavior any
+multi-directory node layout will hit. Rather than editing the published
+`examples/` tree, `examples-harness/mesh-culling/` holds a byte-identical
+copy of every node file plus one patched `structs/Records.hlsl` (same
+`#ifndef` guard fix as the fixture) — `examples-harness/MeshCulling.hlsl`
+includes those, not the originals. Once compiled, parsed cleanly: launch
+modes (including `mesh`), resolved `NumThreads` (from each node's own
+`#define`d thread-count constant), `DispatchGrid`/`MaxDispatchGrid`,
+`NodeID` linkage (`EntryNode`→`CullNode`→`RenderMeshNode`), record fields,
+and comments all matched source.
+
+One more real finding from mesh-culling: `CullNode` calls
+`objects.GetDimensions(count, stride)` but never uses `count`/`stride`
+afterward (the example is a non-functional "diagram skeleton", its own
+words) — dxc's optimizer DCEs the entire call, so **no `!dx.resources`
+metadata node exists in the compiled output at all**, and
+`parse-workgraph.js` correctly reports zero globals for `CullNode`. Not a
+parser bug — matches the tool's own documented approach of reading
+*genuinely, post-optimization used* resources rather than a raw text scan;
+it just means "a node's source text references a global" doesn't imply
+"the compiled node reports that global" if the reference's result is
+provably dead. Worth keeping in mind for v2: this is stricter than the
+current regex scanner's behavior, and correct, but could surprise someone
+expecting a global that's referenced-but-unused to still show up.
+
+Separately: `fetch-dxc.ps1`/`.sh`'s mesh-build auto-detection only scans
+the given source file's own directory tree for the raw string
+`NodeLaunch("mesh")` (`run-dxc.ps1` passes `-HlslPath` as
+`Split-Path -Parent $SourceFile`) — a harness file that `#include`s a
+mesh node from *outside* that tree (e.g. `../../examples/...` reaching out
+of `examples-harness/`) won't be detected, and dxc silently picks the
+stable (non-mesh-capable) build instead, failing later with `attribute
+'NodeLaunch' must have one of these values: broadcasting,coalescing,thread`.
+Keeping the mesh node physically under the scanned source file's directory
+(as `examples-harness/mesh-culling/` does) sidesteps this; a real v2 would
+need either a recursive/`#include`-aware scan or an explicit
+version-pin flag.
+
+## Feature-parity check against the published tool (v1)
+
+Went through the root [`README.md`](../README.md)'s promised feature list and
+its own documented "Limitations" section line by line, checking each
+against what `parse-workgraph.js` actually does today (verified, not
+theoretical — everything below was run, not just read). Categories:
+
+**A. Already recreated and verified, from data extraction alone:**
+
+- Node discovery + `NodeLaunch` mode/dispatch grid/thread count/input-output
+  records/`[NodeID(...)]` overrides (root README's 1st bullet) — the whole
+  core of `parse-workgraph.js`, verified against the fixture and both real
+  examples.
+- `#define`/`static const` resolution in attributes so record counts and
+  dispatch grids show real numeric values (2nd bullet) — dxc resolves this
+  natively as part of compilation (stronger than v1's own JS
+  arithmetic-substitution resolver, see below), **and**, as of this
+  session, the original un-evaluated expression is shown alongside it too
+  (`NumThreads: (32, 1, 1)  [source: COLLECT_THREADS, 1, 1]`) — matching
+  v1's own `COLLECT_THREADS (32)`-style annotation, just sourced from debug
+  info instead of a hand-rolled substitution table.
+- Global GPU resource usage per node (4th bullet) — verified against the
+  fixture's `itemMeta` and (this session) both real examples; `globalsUsed`
+  reports correctly in every case, including a `CullNode` case in
+  mesh-culling where dxc DCEs the whole resource read away (see above) and
+  the parser correctly reports zero globals for it.
+- Three of v1's own documented **Limitations** are inherently resolved by
+  compiling for real rather than regex-scanning, no extra work needed
+  beyond what already exists: (a) "nested comments, `#if`/`#ifdef`-guarded
+  node definitions, multi-line string literals, or attributes split across
+  a macro" — a real preprocessor has none of these problems, verified via
+  the fixture's `#if 0`-dead `EntryNode_OldVersion`; (b) "constant
+  resolution only handles pure arithmetic... anything involving a function
+  call is left unresolved" — dxc evaluates the full HLSL constant-expression
+  language, not a JS arithmetic whitelist, so this ceiling doesn't exist
+  here; (c) "global-resource usage detection inspects only the first
+  occurrence... doesn't track nested-block scoping" — the dxc approach
+  reads the post-inline, post-optimization compiled function body directly,
+  which has no notion of "first occurrence" or lexical scoping to get wrong
+  in the first place.
+
+**B. Recreatable, not yet built — no new dxc data needed:**
+
+- Node depth: longest-path distance from the graph's entry node(s) (3rd
+  bullet, `src/graph.js`'s `computeDepths`) — a ~20-line graph algorithm
+  over already-extracted nodes + `NodeID` edges, no additional dxc
+  extraction required. Straightforward next step if this becomes real v2
+  work.
+- PlantUML rendering itself (5th bullet) — a pure presentation layer
+  (`src/render/*.js`) over a node/edge structure; would need
+  `parse-workgraph.js`'s output reshaped to whatever that layer expects (or
+  that layer adapted), not a data-availability problem.
+
+**C. Not recoverable via this approach — a genuine gap, not just unbuilt:**
+
+- `--record-in-names`/`--record-out-names` (showing a record parameter's
+  own HLSL variable name, e.g. `workItemOutput`, alongside its type) — v1
+  gets this for free from a text scan of the parameter list. Checked
+  whether dxc's debug info carries it: the fixture's disassembly has **zero**
+  `DW_TAG_arg_variable` `DILocalVariable` entries for any node function —
+  only `DW_TAG_auto_variable` ones, and only for locals declared *inside* a
+  node's body (`count`, `stride`, `items`, `result`), never its parameters.
+  Node function parameter names apparently don't survive dxc's node-function
+  lowering into the `DISubprogram`/`DISubroutineType` debug info this tool
+  already reads (which only carries parameter *types*, confirmed by
+  `describeParams()`'s own walk finding no name field to use). No
+  alternative metadata source for this was found or tried yet — flagging as
+  an open question for anyone pursuing this further, not a "not done yet."
+
+**D. Unchanged by design, not a gap either direction:**
+
+- Mesh-shader `out indices`/`out vertices`/`out primitives` arrays are
+  recognized but excluded from node I/O — this matches v1's own documented,
+  deliberate choice (they're rasterizer outputs, not work-graph edges), not
+  a limitation being carried over by accident.
