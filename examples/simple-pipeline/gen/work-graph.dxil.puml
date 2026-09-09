@@ -56,7 +56,7 @@ legend right
   Dashed border = grid can expand to >1 thread group per invocation
   (NodeMaxDispatchGrid, or NodeDispatchGrid != (1,1,1)); solid border = always
   exactly one group (NodeDispatchGrid(1,1,1), thread launch, or coalescing)
-  <size:7><color:#8A8A8A>hlsl-workgraph-diagram v2.0.0 · dxil parsing</color></size>
+  <size:7><color:#8A8A8A>hlsl-workgraph-diagram v2.0.5 · dxil parsing</color></size>
   <size:7><color:#8A8A8A>dxc: dxcompiler.dll: 1.9(5402-0d3ee6b5)(1.9.0.5402) - 1.9.0.5402 (0d3ee6b55-dirty)</color></size>
 endlegend
 @enduml
