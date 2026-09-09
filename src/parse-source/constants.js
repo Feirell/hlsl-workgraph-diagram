@@ -12,17 +12,21 @@
 // shaders tree (not just nodes-*), so identifiers like CUBOID_FACES or
 // MAX_GLYPHS_PER_RENDER_RECORD (declared in utilities/ or structs/) resolve.
 //
-// Pure resolution only - display formatting (annotated "IDENT (value)"
-// text, short-mode, grey-ones, "= total" suffixes) lives in build-puml's
-// node-label.js instead, operating on the {resolved, source} pairs to-ir.js
-// builds from resolveExpr() below. Keeping resolution here and formatting
-// there is what lets parse-dxil's IR (already-resolved by dxc, no table of
-// its own) feed the exact same build-puml formatting code.
+// Resolution (resolveExpr/resolveIdentifier/annotateExpr, generator-agnostic
+// - see ../common/expr-resolve.js) happens here, at parse time, into to-ir.js's
+// {resolved, source} pairs - source already carries any identifier's own
+// value baked in as "IDENT (value)" via annotateExpr(). Remaining display
+// formatting (short-mode, grey-ones, the "= total" suffix for a genuine
+// multi-factor product) lives in build-puml's node-label.js, working only
+// off that pair - which is what lets parse-dxil's IR (its own constants.js
+// builds an equivalent table from dxc's embedded source debug info, not a
+// filesystem scan) feed the exact same build-puml formatting code.
 // ---------------------------------------------------------------------------
 
 const fs = require('fs');
 const { listHlslFiles } = require('./discovery');
 const { stripComments } = require('./comments');
+const { resolveExpr, resolveIdentifier, annotateExpr } = require('../common/expr-resolve');
 
 function collectConstants(rootDir) {
     const table = new Map();
@@ -43,37 +47,4 @@ function collectConstants(rootDir) {
     return table;
 }
 
-// Resolves an arithmetic expression to a number by iteratively substituting
-// known identifiers, then safely evaluating the fully-numeric result.
-// Returns null if any identifier stays unresolved or the result isn't a
-// finite number.
-function resolveExpr(expr, table) {
-    let current = expr;
-    for (let i = 0; i < 8; i++) {
-        let changed = false;
-        const next = current.replace(/\b[A-Za-z_]\w*\b/g, (id) => {
-            if (table.has(id)) {
-                changed = true;
-                return `(${table.get(id)})`;
-            }
-            return id;
-        });
-        current = next;
-        if (!changed) break;
-    }
-
-    const withoutHexLiterals = current.replace(/0[xX][0-9a-fA-F]+/g, '0');
-    if (/[A-Za-z_]/.test(withoutHexLiterals)) return null; // still unresolved identifiers
-    if (!/[0-9]/.test(current)) return null;
-    if (!/^[\s0-9+\-*/().xXa-fA-F]+$/.test(current)) return null; // safety whitelist
-
-    try {
-        // eslint-disable-next-line no-new-func
-        const val = Function(`"use strict"; return (${current});`)();
-        return typeof val === 'number' && Number.isFinite(val) ? val : null;
-    } catch {
-        return null;
-    }
-}
-
-module.exports = { collectConstants, resolveExpr };
+module.exports = { collectConstants, resolveExpr, resolveIdentifier, annotateExpr };
