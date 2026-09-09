@@ -56,12 +56,39 @@ function tripleTotalSuffix(field) {
     return ` = ${field.resolved.reduce((a, b) => a * b, 1)}`;
 }
 
+// Whether an expression's source text is pure arithmetic on literals (only
+// digits/operators/whitespace, e.g. "1 * 32") rather than referencing a
+// named constant (e.g. "1 * NUM_THREADS"). Guards the "(resolved)"
+// annotation below: a literal-only expression's value is already legible
+// from the expression itself, so appending its resolved value in parens
+// (e.g. "1 * 32 (32)") just repeats a number that's already sitting right
+// there, whereas for an identifier the resolved value is the only place
+// its actual number shows up.
+function isLiteralExpr(text) {
+    return /^[\d\s+\-*/%.,()]+$/.test(text);
+}
+
+// Whether an expression trivially multiplies by literal 1 (e.g. "1 * 32" or
+// "COUNT * 1") - the common "one record per thread" idiom. Its resolved
+// value is always just the other operand, already visible in the source,
+// so the " = <value>" total suffix below is skipped for it even when the
+// other operand is an identifier (whose resolved value is otherwise worth
+// showing via the "(resolved)" annotation).
+function isTrivialIdentityMultiply(text) {
+    const s = text.replace(/\s+/g, '');
+    return /^1\*.+$/.test(s) || /^.+\*1$/.test(s);
+}
+
 // A scalar field's plain display text - the original text with the
-// resolved value in parens when there is original text to show, else just
-// the resolved number (or "?").
+// resolved value in parens when there is original text to show and that
+// text isn't itself a literal-only expression (see isLiteralExpr above),
+// else just the resolved number (or "?").
 function formatScalarInline(field) {
     if (!field) return '?';
-    if (field.source != null) return field.resolved != null ? `${field.source} (${field.resolved})` : `${field.source} (?)`;
+    if (field.source != null) {
+        if (field.resolved == null) return `${field.source} (?)`;
+        return isLiteralExpr(field.source) ? field.source : `${field.source} (${field.resolved})`;
+    }
     return field.resolved != null ? String(field.resolved) : '?';
 }
 
@@ -77,10 +104,15 @@ function scalarBraces(field, short) {
     return ` (${formatScalarInline(field)}${scalarTotalSuffix(field)})`;
 }
 
-// Skipped when there's no original text to simplify (a bare literal) or
-// the expression didn't resolve.
+// Skipped when there's no original text to simplify (a bare literal), the
+// expression didn't resolve, or the expression is a trivial "1 * x" / "x *
+// 1" identity multiply (see isTrivialIdentityMultiply above) - its value is
+// already visible in the source (and, for an identifier operand, already
+// shown via formatScalarInline's "(resolved)" annotation), so restating it
+// again here would be redundant.
 function scalarTotalSuffix(field) {
     if (!field || field.source == null || field.resolved == null) return '';
+    if (isTrivialIdentityMultiply(field.source)) return '';
     return ` = ${field.resolved}`;
 }
 
