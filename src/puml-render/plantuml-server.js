@@ -126,6 +126,25 @@ async function fetchBinaryWithRetry(url, attempts, backoffMs, log) {
     throw lastErr;
 }
 
+// Writes a rendered output file, tagging failures as write errors (as
+// opposed to fetch/server errors) so callers can report them accurately -
+// e.g. "UNKNOWN: unknown error, open '...png'" on Windows when the existing
+// file is held open by another program (an image viewer, VS Code preview,
+// etc.) is a local filesystem problem, not a PlantUML server one.
+function writeOutputFile(filePath, data, log) {
+    try {
+        fs.writeFileSync(filePath, data);
+    } catch (err) {
+        const wrapped = new Error(
+            `could not write ${filePath} (${err.message}) - it may be open in another program ` +
+                '(an image/SVG viewer, editor, etc.); close it and re-run puml-render.'
+        );
+        wrapped.isWriteError = true;
+        throw wrapped;
+    }
+    log.verbose(`Wrote ${filePath} (${data.length} bytes)`);
+}
+
 async function renderWithPlantumlServer(pumlText, outBase, serverBase, logger) {
     const log = logger || require('../common/logger').createLogger(false);
     const encoded = plantumlEncode(pumlText);
@@ -133,10 +152,8 @@ async function renderWithPlantumlServer(pumlText, outBase, serverBase, logger) {
         fetchBinaryWithRetry(`${serverBase}/png/${encoded}`, 3, 1500, log),
         fetchBinaryWithRetry(`${serverBase}/svg/${encoded}`, 3, 1500, log),
     ]);
-    fs.writeFileSync(`${outBase}.png`, png);
-    log.verbose(`Wrote ${outBase}.png (${png.length} bytes)`);
-    fs.writeFileSync(`${outBase}.svg`, svg);
-    log.verbose(`Wrote ${outBase}.svg (${svg.length} bytes)`);
+    writeOutputFile(`${outBase}.png`, png, log);
+    writeOutputFile(`${outBase}.svg`, svg, log);
 
     // Most PlantUML servers cap PNG output at a fixed pixel limit per
     // dimension (PLANTUML_LIMIT_SIZE, commonly 4096) and silently crop
