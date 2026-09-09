@@ -68,7 +68,7 @@ legend right
   a global is effectively an input too, just dashed to stay visually distinct from
   a produced-record edge; each global is replicated once per consuming node-group
   to keep edges short (see the global resource table above for the full, ungrouped list)
-  <size:7><color:#8A8A8A>hlsl-workgraph-diagram v2.0.0 · dxil parsing</color></size>
+  <size:7><color:#8A8A8A>hlsl-workgraph-diagram v2.0.5 · dxil parsing</color></size>
   <size:7><color:#8A8A8A>dxc: dxcompiler.dll: 1.9 - 1.8.2404.55 (cfc8ba0c1)</color></size>
 endlegend
 @enduml
