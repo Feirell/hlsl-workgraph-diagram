@@ -155,14 +155,27 @@ behind every design choice below - which DXIL metadata tags are documented vs. e
    tolerates an arbitrary dotted prefix before `class.`/`struct.` - don't re-anchor that pattern to the
    exact start of the string.
 
-   **Gotcha #2 (already hit once, don't reintroduce):** dxc's LLVM type printer has no HLSL-alias spelling
-   for a *bare* builtin vector/matrix type used directly as a resource's element type - confirmed against a
-   real compile of `StructuredBuffer<float3>`: its LLVM type name is literally `StructuredBuffer<vector<
-   float, 3> >`, space before the closing `>` included, with no "float3" string anywhere in the
-   disassembly to recover instead. `normalizeDxilTypeName()` maps `vector<T, N>`/`matrix<T, R, C>` back to
-   HLSL's `TN`/`TRxC` spelling itself (bounded-loop regex replace, since one can appear nested inside a
-   larger template argument) - applied to whatever `extractResourceValueType()` recovers, not something
-   dxc's own text ever gives you.
+   **Gotcha #2 (hit twice, don't reintroduce either regression):** dxc's LLVM type printer has no
+   HLSL-alias spelling for a *bare* builtin vector/matrix type used directly as a resource's element type -
+   confirmed against a real compile of `StructuredBuffer<float3>`: its LLVM type name is literally
+   `StructuredBuffer<vector<float, 3> >`, space before the closing `>` included, with no "float3" string
+   anywhere in the disassembly to recover instead. `normalizeDxilTypeName()` maps `vector<T, N>`/
+   `matrix<T, R, C>` back to HLSL's `TN`/`TRxC` spelling (bounded-loop regex replace, since one can appear
+   nested inside a larger template argument) - applied to whatever `extractResourceValueType()` recovers,
+   not something dxc's own text ever gives you directly.
+
+   The part that regressed once already: `T` itself isn't always spelled the same as the HLSL keyword -
+   `uint3`/`dword3` both compile to `vector<unsigned int, 3>` (two words), so a first fix that only mapped
+   the wrapper (`vector<T, N>` -> `TN`) while leaving `T` untouched still produced `unsigned int3`. Fixed
+   for real by compiling every HLSL scalar keyword as a `StructuredBuffer<T>` element type and reading back
+   what dxc actually named each one - `DXIL_SCALAR_TO_HLSL` is that verified table (`hlslScalarName()` does
+   the lookup, falling back to the raw captured text for anything not in it, e.g. `min10float`/`min12int` -
+   plausible spellings, never actually produced against a real compile, so not guessed at): `float`/
+   `double`/`int`/`bool`/`half`/`min16float`/`min16int`/`min16uint` print unchanged; `"unsigned int"` ->
+   `uint` (also what `dword` compiles down to - no separate type identity survives for it to recover
+   distinctly); `"long long"` -> `int64_t`; `"unsigned long long"` -> `uint64_t`. The capture pattern for
+   `T` had to change too, from word-characters-only to "everything up to the next comma/angle-bracket", to
+   let a multi-word spelling reach that lookup at all.
 4. **`original-attrs.js`** - recovers a node's *original*, unevaluated attribute text (e.g. the
    `COLLECT_THREADS` in `[NumThreads(COLLECT_THREADS, 1, 1)]`) from the same `dx.source.contents` debug
    info used for comments: `extractLeadingAttributeBlock()` walks the `[...]` lines directly above a

@@ -234,23 +234,56 @@ const RESOURCE_KIND_NAMES = {
 };
 
 // dxc's LLVM type printer spells HLSL's builtin vector/matrix aliases out
-// by their underlying template instantiation - "float3" prints as
-// "vector<float, 3>", "float4x4" as "matrix<float, 4, 4>" - there is no
-// alternate "float3" spelling anywhere in the disassembly text to recover
-// instead; confirmed against a real compile of `StructuredBuffer<float3>`
-// (this exact global produced the literal type name
-// `class.StructuredBuffer<vector<float, 3> >`, spaces included). This maps
-// that spelling back to the familiar HLSL one, applied wherever a type
-// name recovered from raw disassembly text might contain it - currently
-// just extractResourceValueType() below. Loops (bounded) since a matrix or
-// vector can appear nested inside a larger template argument.
+// by their underlying C++ template instantiation, not just for "float" -
+// every scalar keyword goes through its own C++ spelling, which for
+// several of them isn't even the same word, let alone the same single
+// token (e.g. `uint`/`dword` -> "unsigned int", two words). Confirmed
+// against a real compile exercising every HLSL scalar keyword as a
+// StructuredBuffer<T> element type (`StructuredBuffer<uint3>` produced the
+// literal type name `class.StructuredBuffer<vector<unsigned int, 3> >`,
+// space before the closing `>` included) - this is the complete, verified
+// set of scalar spellings dxc's build produced:
+const DXIL_SCALAR_TO_HLSL = {
+    float: 'float',
+    double: 'double',
+    int: 'int',
+    bool: 'bool',
+    half: 'half',
+    min16float: 'min16float',
+    min16int: 'min16int',
+    min16uint: 'min16uint',
+    'unsigned int': 'uint', // also what `dword` compiles down to - the two are indistinguishable at this point, dword has no separate type identity to recover
+    'long long': 'int64_t',
+    'unsigned long long': 'uint64_t',
+};
+
+// Maps a captured scalar type name (dxc's C++ spelling, e.g. "unsigned
+// int") back to its HLSL keyword via the verified table above - falls back
+// to the raw captured text unchanged for anything not in it (e.g.
+// min10float/min12int, plausible but never actually produced against a
+// real compile - safer to pass the true dxc spelling through than to
+// guess it maps 1:1 to a same-named HLSL keyword).
+function hlslScalarName(dxilName) {
+    const normalized = dxilName.replace(/\s+/g, ' ').trim();
+    return DXIL_SCALAR_TO_HLSL[normalized] || normalized;
+}
+
+// Rewrites "vector<T, N>" / "matrix<T, R, C>" (dxc's spelling for HLSL's
+// TN/TRxC builtin aliases - see DXIL_SCALAR_TO_HLSL above for why T itself
+// needs translating too, not just the wrapper) back to HLSL syntax.
+// Applied wherever a type name recovered from raw disassembly text might
+// contain it - currently just extractResourceValueType() below. Loops
+// (bounded) since a matrix or vector can appear nested inside a larger
+// template argument. T is captured as "everything up to the next comma or
+// angle bracket" rather than a word-character-only pattern, specifically
+// because several real spellings (see the table) are multiple words.
 function normalizeDxilTypeName(name) {
     if (!name) return name;
     let current = name;
     for (let i = 0; i < 4; i++) {
         const next = current
-            .replace(/\bmatrix<\s*([\w:]+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/g, (_, t, r, c) => `${t}${r}x${c}`)
-            .replace(/\bvector<\s*([\w:]+)\s*,\s*(\d+)\s*>/g, (_, t, n) => `${t}${n}`);
+            .replace(/\bmatrix<\s*([^,<>]+?)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/g, (_, t, r, c) => `${hlslScalarName(t)}${r}x${c}`)
+            .replace(/\bvector<\s*([^,<>]+?)\s*,\s*(\d+)\s*>/g, (_, t, n) => `${hlslScalarName(t)}${n}`);
         if (next === current) break;
         current = next;
     }
@@ -371,6 +404,8 @@ module.exports = {
     normalizePath,
     getSourceFiles,
     extractLeadingComment,
+    DXIL_SCALAR_TO_HLSL,
+    hlslScalarName,
     normalizeDxilTypeName,
     extractResourceValueType,
     getResources,

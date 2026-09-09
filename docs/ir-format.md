@@ -116,13 +116,21 @@ anywhere) - and that type name itself is prefixed `hostlayout.` (`%"hostlayout.c
 `extractResourceValueType()` now tries both the original bitcast-wrapped-reference shape and a direct-
 declaration shape, and its type-name pattern tolerates an arbitrary dotted prefix before `class.`/`struct.`.
 
-**Gotcha #2 (already hit once, don't reintroduce):** dxc's LLVM type printer has no HLSL-alias spelling at
-all for a *bare* builtin vector/matrix type used directly as a resource's element type - confirmed
-against a real compile of `StructuredBuffer<float3>`, whose LLVM type name is literally
+**Gotcha #2 (hit twice, don't reintroduce either regression):** dxc's LLVM type printer has no HLSL-alias
+spelling at all for a *bare* builtin vector/matrix type used directly as a resource's element type -
+confirmed against a real compile of `StructuredBuffer<float3>`, whose LLVM type name is literally
 `class.StructuredBuffer<vector<float, 3> >` (space before the closing `>` included). There's no "float3"
 string anywhere in the disassembly to fall back to; `normalizeDxilTypeName()` maps the `vector<T, N>`/
-`matrix<T, R, C>` spelling back to HLSL's `TN`/`TRxC` form itself, applied to whatever
-`extractResourceValueType()` recovers.
+`matrix<T, R, C>` spelling back to HLSL's `TN`/`TRxC` form. The part hit *twice*: `T` itself isn't always
+the same word as the HLSL scalar keyword either - `uint`/`dword` compile down to the two-word C++ spelling
+"unsigned int" (so `uint3` initially still came out as `vector<unsigned int, 3>` even after the first fix,
+since the original regex only captured a single word for `T`). Verified against a real compile exercising
+every HLSL scalar keyword as a `StructuredBuffer<T>` element type - the complete set `DXIL_SCALAR_TO_HLSL`
+maps: `float`/`double`/`int`/`bool`/`half`/`min16float`/`min16int`/`min16uint` unchanged, `"unsigned int"`
+-> `uint` (also what `dword` compiles down to - the two are indistinguishable at this point, `dword` has
+no separate type identity left to recover), `"long long"` -> `int64_t`, `"unsigned long long"` ->
+`uint64_t`. `T` is now captured as "everything up to the next comma/angle-bracket", not a word-characters-
+only pattern, specifically to allow multi-word spellings through to that lookup.
 
 **Global-set semantics differ, not just field richness**: `parse-source`'s `globals[]` lists *every*
 resource declared anywhere in the scanned tree, whether any node reads it or not (that's how the legend
