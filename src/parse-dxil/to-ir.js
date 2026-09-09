@@ -53,30 +53,30 @@ function buildTripleField(resolvedArr, originalCsv) {
     return { resolved: resolvedArr, source };
 }
 
-const REG_TYPE_BY_RESOURCE_CLASS = { SRV: 't', UAV: 'u', CBV: 'b', Sampler: 's' };
-
 function resourceToIr(r) {
     return {
         name: r.name || r.globalVariable,
         resourceClass: r.resourceClass,
-        // Not currently extracted from !dx.resources (the raw entry's other
-        // tuple fields were never decoded beyond the global reference and
-        // name - see dxil-metadata.js's getResources()): rw/kind/valueType/
-        // space are real gaps, not derivable from what's parsed today.
-        rw: null,
-        kind: null,
-        valueType: null,
-        regType: REG_TYPE_BY_RESOURCE_CLASS[r.resourceClass] || null,
-        regSlot: null,
-        space: null,
-        file: null,
+        // rw is derived, not literally read off an "RW" prefix the way
+        // parse-source's text scan does: any resource compiled into the
+        // UAV class is read-write by construction (that's what makes it a
+        // UAV rather than an SRV), so resourceClass === 'UAV' is exactly
+        // equivalent for every case this tool models (structured/raw/typed
+        // buffers) - see docs/ir-format.md.
+        rw: r.resourceClass === 'UAV',
+        kind: r.kind,
+        valueType: r.valueType,
+        regType: r.regType,
+        regSlot: r.regSlot,
+        space: r.space,
+        file: null, // not recoverable from !dx.resources - would need a debug-info cross-reference not yet implemented
     };
 }
 
 function buildIr(dis, resolveId, generatorDetail) {
     const subprogramsByName = getSubprogramsByFunctionName(resolveId, dis.named);
     const sourceFiles = getSourceFiles(resolveId, dis.named);
-    const resources = getResources(resolveId, dis.named);
+    const resources = getResources(resolveId, dis.named, dis.text);
 
     const nodes = [];
     for (const id of dis.named.get('dx.entryPoints') || []) {
@@ -110,10 +110,15 @@ function buildIr(dis, resolveId, generatorDetail) {
         const toParam = (rec, i, offset) => {
             const debugParam = debugInfo && debugInfo.params[offset + i];
             const originalMaxRecords = originalAttrs ? originalAttrs.ioMaxRecords[offset + i] : null;
+            const varName = originalAttrs ? originalAttrs.ioVarNames[offset + i] : null;
             return {
                 recordKind: debugParam ? debugParam.paramKind : null,
                 recordType: debugParam ? debugParam.recordType : null,
-                varName: null, // not recoverable from this dxc build's debug info - see docs/ir-format.md
+                // Not in dxc's debug info (no DW_TAG_arg_variable for node
+                // function params - see docs/ir-format.md) - recovered
+                // instead from the same pre-preprocessor source text as
+                // MaxRecords, via original-attrs.js's extractParamVarName().
+                varName: varName || null,
                 linkedNodeID: rec.linkedNodeID || null,
                 maxRecords: buildScalarField(rec.maxRecords, originalMaxRecords),
                 maxRecordsSharedWith: null, // DXIL tag unverified against a real compile - see docs/ir-format.md

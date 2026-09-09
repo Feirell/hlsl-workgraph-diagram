@@ -29,7 +29,10 @@ Five independent commands, each its own directory under `src/`, dispatched by `s
 Within `src/common/`: `text-utils.js` (string/paren helpers: `splitTopLevel`, `findMatchingParen`/`Brace`,
 `pumlEscape`, `unquote`, `escapeRegExp` - shared by `parse-source` and `build-puml`), `themes.js`
 (`THEMES.light`/`.dark`, used by `build-puml`), `cli-args.js` (the small declarative flag parser every
-command's own CLI module uses), `ir.js` (`IR_VERSION`, `writeIrFile()`/`readIrFile()`).
+command's own CLI module uses, plus `VERBOSE_SPEC` - the shared `--verbose`/`-v` flag definition every
+command includes in its own spec list), `logger.js` (`createLogger(verboseEnabled)` -> `{info, verbose}`;
+`info()` is the terse default-mode summary, `verbose()` only prints under `--verbose` - per-item detail and
+the exact system commands issued), `ir.js` (`IR_VERSION`, `writeIrFile()`/`readIrFile()`).
 
 Each command directory has its own `index.js` (the `run(argv)` entry `cli.js` calls, plus `--help` text)
 and, where relevant, its own `options.js` (flag definitions + derivation, `build-puml`'s is the interesting
@@ -101,13 +104,18 @@ behind every design choice below - which DXIL metadata tags are documented vs. e
    <name|version>` (resolved via `setup-dxil`'s `aliases.json`/version-keyed cache - see the `setup-dxil`
    section below) > `HLSL_WORKGRAPH_DXC` env var > auto-detection (picks the `mesh` or `stable` alias via a
    plain, non-recursive text scan of the entry file for `NodeLaunch("mesh")` - see `docs/ir-format.md`'s
-   "Known differences" #5 for the limitation this heuristic has). Then shells out via
+   "Known differences" #4 for the limitation this heuristic has). Then shells out via
    `child_process.execFileSync` with
-   `-T lib_6_8 -Zi -Qembed_debug [-Vd if no dxil.dll] -Fo <tmp>.dxil -Fc <tmp>.ll <entryFile>`, into a
-   throwaway temp dir (or `--keep-intermediate <dir>` to keep the `.dxil`/`.ll` for inspection).
+   `-T lib_6_8 -Zi -Qembed_debug [-Vd if no dxil.dll] -Fo <stem>.dxil -Fc <stem>.dis.ll <entryFile>`, into a
+   throwaway temp dir, or (`--keep-intermediate`, boolean) the current working directory - e.g. to inspect
+   the disassembly, or hand it to `index.js`'s `--from-disassembly` on a later run (or a different
+   machine - see the root README's "Generating the disassembly yourself"), which skips this whole function
+   and calls `disassembly.js`'s `loadDisassembly()` directly, needing no `dxc` at all.
    `getDxcVersionString()` best-effort runs `dxc --version` afterward (works regardless of how `dxc` was
    located) and stashes the first line in the IR's `generatorDetail.dxcVersion` - `build-puml`'s legend
-   provenance line reads it from there (see the `build-puml` section below).
+   provenance line reads it from there (see the `build-puml` section below). Every step here logs through
+   the `logger` passed in from `index.js` (see `../common/logger.js`) - the exact command line, the `dxc`
+   path chosen, and the kept-file paths are all `log.verbose()`, only shown under `--verbose`.
 2. **`disassembly.js`** - a from-scratch LLVM metadata *text* parser (not a general LLVM IR parser): just
    enough grammar to walk `!N = !{...}` tuples and `!N = !DIXxx(key: val, ...)` debug-info nodes from a
    `-Fc` disassembly. `makeResolver(rawMap)` gives a memoized `resolveId(N)` with a call-stack (not
@@ -121,12 +129,32 @@ behind every design choice below - which DXIL metadata tags are documented vs. e
    DXIL function body for `createHandleForLib` calls - catches usage through inlined helper functions a
    source-text scanner never could, and correctly reports *zero* globals for a resource whose only
    reference got dead-code-eliminated, since the metadata node itself won't exist).
+
+   `getResources()` decodes more than the global reference and name: `[ID, GlobalVar, Name, Space,
+   RangeStart, RangeSize, ResourceKind, ...]` is the documented "resource base record" shared by all four
+   classes (SRV/UAV/CBV/Sampler) - confirmed against a real compile - giving `space`/`regSlot` for free, and
+   (for SRV/UAV) `ResourceKind` (`RESOURCE_KIND_NAMES` - documented in dxc's `DXIL.h`, confirmed here: a
+   `StructuredBuffer<T>` produced literal `12`) for `kind`. `extractResourceValueType()` recovers the
+   friendly element-type name (`"ItemMeta"` out of `StructuredBuffer<ItemMeta>`) by finding that specific
+   global's own LLVM type annotation in the raw disassembly text and pulling the `<...>` out of it - the
+   resource metadata tuple itself has no friendly type name, only the mangled one. `to-ir.js`'s
+   `resourceToIr()` derives `rw` as `resourceClass === 'UAV'` (not read from a literal "RW" prefix - a
+   buffer is only ever compiled into the UAV class *because* it's read-write, so this is exact for every
+   resource kind this tool models). Verified end-to-end against the fixture's `itemMeta`
+   (`StructuredBuffer<ItemMeta>` SRV); CBuffer/Sampler/UAV/resource-array cases are implemented from the
+   documented/inferred shared schema but not yet exercised against a real compile of one.
 4. **`original-attrs.js`** - recovers a node's *original*, unevaluated attribute text (e.g. the
    `COLLECT_THREADS` in `[NumThreads(COLLECT_THREADS, 1, 1)]`) from the same `dx.source.contents` debug
    info used for comments: `extractLeadingAttributeBlock()` walks the `[...]` lines directly above a
    function, `extractParamListText()`/`splitParamsTopLevel()` walk its parameter list, `extractAttrArgs()`
    pulls one attribute's balanced-paren argument text. Pure text extraction - the resolved value always
-   comes from `dxil-metadata.js`.
+   comes from `dxil-metadata.js`. `extractParamVarName()` recovers each I/O parameter's own HLSL variable
+   name the same way - not from debug info (dxc's build has zero `DW_TAG_arg_variable` entries for node
+   function parameters, only `DW_TAG_auto_variable` for in-body locals - a real, confirmed gap, not
+   guessed), but by stripping a parameter chunk's `[Attr(...)]` blocks and taking the trailing identifier.
+   Verified against `examples/simple-pipeline`, `examples/mesh-culling`, and the fixture - matches source
+   exactly in every case checked, closing what used to be a "always `null`" gap in `to-ir.js`'s `varName`
+   field.
 **Gotcha (already hit once, don't reintroduce):** `dx.source.contents` preserves a source file's original
 line endings verbatim - CRLF included, if that's how the file was saved. `dxil-metadata.js`'s
 `getSourceFiles()` normalizes every file's content to `\n`-only *once*, right when it's read out of the
@@ -192,10 +220,12 @@ history is useful) and `experimental` (a prerelease being delisted has never bee
 separate problem), but `stable` specifically has to go through the search API, which correctly reflects
 what NuGet itself currently considers "latest".
 
-`ensureDxcInstalled(version)` is idempotent (skips the network entirely if `dxc.exe` already exists at that
-version's cache path), downloads the `.nupkg`, extracts `dxc.exe`/`dxcompiler.dll` (required) and
+`ensureDxcInstalled(version, logger)` is idempotent (skips the network entirely if `dxc.exe` already exists
+at that version's cache path), downloads the `.nupkg`, extracts `dxc.exe`/`dxcompiler.dll` (required) and
 `dxil.dll` (best-effort - not every version ships one; `run-dxc.js` passes `-Vd` to skip validation when
-it's absent).
+it's absent). The download URL and each extracted file are `logger.verbose()` - `index.js`'s `--verbose`
+is the only way to see them; the default output is just "installing/already installed" + the final
+install-summary lines.
 
 ## `build-puml`: IR JSON -> PlantUML
 
@@ -296,7 +326,10 @@ requested via a plain `GET .../png/<encoded>`/`.../svg/<encoded>`. `fetchBinary(
 actually non-empty `image/*` (see Gotcha #2 above); `fetchBinaryWithRetry()` retries up to 3 times (1.5s
 backoff). `readPngDimensions()` (reads the IHDR chunk directly) and `readSvgDimensions()` (regexes the root
 `<svg>` tag) are compared to detect the PlantUML-server pixel-size-limit cropping bug (see the root
-README's Rendering notes) - both images are already fetched, so the comparison costs nothing extra.
+README's Rendering notes) - both images are already fetched, so the comparison costs nothing extra. Every
+request URL, retry attempt, and bytes-written line goes through `logger.verbose()` - `--verbose` is the
+only way to see them; the crop-limit warning and final failure message are `logger.info()` (always shown),
+same as before.
 
 **`--scale`** lives here, not on `build-puml`: `index.js`'s `withScale()` inserts (or replaces) a `scale
 <n>` line right after `@startuml` in the `.puml` *text in memory*, immediately before encoding it for the

@@ -2,7 +2,8 @@
   "irVersion": 1,
   "generator": "parse-dxil",
   "generatorDetail": {
-    "entryFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\simple-pipeline\\WorkGraph.hlsl",
+    "entryFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\simple-pipeline\\src\\WorkGraph.hlsl",
+    "fromDisassembly": null,
     "defines": [],
     "exportNames": [],
     "dxcExe": "C:\\Users\\User\\.hlsl-workgraph-diagram\\dxc\\1.9.2607.13\\x64\\dxc.exe",
@@ -14,7 +15,7 @@
       "nodeIdIndex": 0,
       "functionName": "CollectNode",
       "group": "nodes-compute",
-      "sourceFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\simple-pipeline/nodes-compute/CollectNode.hlsl",
+      "sourceFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\simple-pipeline\\src/nodes-compute/CollectNode.hlsl",
       "sourceLine": 17,
       "comment": "Gathers up to 64 ResultRecords per invocation. Terminal node - no output.",
       "isEntry": false,
@@ -39,7 +40,7 @@
         {
           "recordKind": "GroupNodeInputRecords",
           "recordType": "ResultRecord",
-          "varName": null,
+          "varName": "results",
           "linkedNodeID": null,
           "maxRecords": {
             "resolved": 64,
@@ -63,7 +64,7 @@
       "nodeIdIndex": 0,
       "functionName": "EntryNode",
       "group": "nodes-compute",
-      "sourceFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\simple-pipeline/nodes-compute/EntryNode.hlsl",
+      "sourceFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\simple-pipeline\\src/nodes-compute/EntryNode.hlsl",
       "sourceLine": 18,
       "comment": "Graph entry point: a fixed 1x1x1 broadcasting dispatch that fans out\nup to 64 work items to GenerateNode.",
       "isEntry": true,
@@ -100,7 +101,7 @@
         {
           "recordKind": "NodeOutput",
           "recordType": "WorkItemRecord",
-          "varName": null,
+          "varName": "workItemOutput",
           "linkedNodeID": {
             "name": "GenerateNode",
             "index": 0
@@ -126,7 +127,7 @@
       "nodeIdIndex": 0,
       "functionName": "GenerateNode",
       "group": "nodes-compute",
-      "sourceFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\simple-pipeline/nodes-compute/GenerateNode.hlsl",
+      "sourceFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\simple-pipeline\\src/nodes-compute/GenerateNode.hlsl",
       "sourceLine": 15,
       "comment": "One thread per WorkItemRecord; produces a single ResultRecord for\nCollectNode to gather.",
       "isEntry": false,
@@ -151,7 +152,7 @@
         {
           "recordKind": "ThreadNodeInputRecord",
           "recordType": "WorkItemRecord",
-          "varName": null,
+          "varName": "inputRecord",
           "linkedNodeID": null,
           "maxRecords": null,
           "maxRecordsSharedWith": null,
@@ -167,7 +168,7 @@
         {
           "recordKind": "NodeOutput",
           "recordType": "ResultRecord",
-          "varName": null,
+          "varName": "resultOutput",
           "linkedNodeID": {
             "name": "CollectNode",
             "index": 0

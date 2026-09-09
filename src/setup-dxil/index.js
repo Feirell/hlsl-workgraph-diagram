@@ -15,7 +15,8 @@
 // (see ./paths.js) - no dxc install of your own required.
 // ---------------------------------------------------------------------------
 
-const { parseArgs } = require('../common/cli-args');
+const { parseArgs, VERBOSE_SPEC } = require('../common/cli-args');
+const { createLogger } = require('../common/logger');
 const { ensureDxcInstalled, resolveVariant, listAllVersions, isPrerelease, NAMED_VARIANTS } = require('./fetch');
 const { dxcPathForVersion, writeAlias, readAliases } = require('./paths');
 const fs = require('fs');
@@ -43,20 +44,24 @@ Arguments:
                  "experimental" currently resolve to.
 
 Options:
+  --verbose, -v    Print the exact HTTP requests made and each extracted
+                    file, instead of just the install summary.
   --help, -h, -?   Show this help text and exit.
 `);
 }
 
 async function run(argv) {
-    const { positionals, help } = parseArgs(argv, []);
+    const { values, positionals, help } = parseArgs(argv, [VERBOSE_SPEC]);
     if (help) {
         printHelp();
         return;
     }
+    const log = createLogger(values.verbose);
 
     const arg = positionals[0] || 'stable';
 
     if (arg === 'list') {
+        log.verbose('GET https://api.nuget.org/v3-flatcontainer/microsoft.direct3d.dxc/index.json');
         const allVersions = await listAllVersions();
         const currentAliases = {};
         for (const name of NAMED_VARIANTS) currentAliases[name] = await resolveVariant(name);
@@ -79,15 +84,16 @@ async function run(argv) {
         return;
     }
 
+    if (NAMED_VARIANTS.includes(arg)) log.verbose(`Resolving "${arg}"...`);
     const version = await resolveVariant(arg);
-    const dir = await ensureDxcInstalled(version);
+    const dir = await ensureDxcInstalled(version, log);
 
     if (NAMED_VARIANTS.includes(arg)) {
         writeAlias(arg, version);
-        console.error(`"${arg}" -> ${version}`);
+        log.info(`"${arg}" -> ${version}`);
     }
-    console.error(`dxc ready at: ${dir}`);
-    console.error(`(parse-dxil will find it via --dxc-version ${NAMED_VARIANTS.includes(arg) ? arg : version}, or auto-detected if it's mesh/stable)`);
+    log.info(`dxc ready at: ${dir}`);
+    log.info(`(parse-dxil will find it via --dxc-version ${NAMED_VARIANTS.includes(arg) ? arg : version}, or auto-detected if it's mesh/stable)`);
 }
 
 module.exports = { run, printHelp };

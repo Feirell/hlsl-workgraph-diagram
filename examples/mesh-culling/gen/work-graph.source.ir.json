@@ -2,7 +2,7 @@
   "irVersion": 1,
   "generator": "parse-source",
   "generatorDetail": {
-    "rootDir": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\mesh-culling",
+    "rootDir": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\mesh-culling\\src",
     "nodeDirs": [
       "nodes-compute",
       "nodes-mesh"

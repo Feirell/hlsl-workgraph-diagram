@@ -241,7 +241,7 @@ function renderPlantUml(nodes, edges, externalIds, globals, opts, provenance = {
         lines.push('  a produced-record edge; each global is replicated once per consuming node-group');
         lines.push('  to keep edges short (see the global resource table above for the full, ungrouped list)');
     }
-    lines.push(`  ${provenanceLine(theme, provenance)}`);
+    for (const l of provenanceLines(theme, provenance)) lines.push(`  ${l}`);
     lines.push('endlegend');
 
     lines.push('@enduml');
@@ -253,17 +253,21 @@ function recordTypeSpanFor(recordType, theme) {
     return `<color:${theme.recordHighlight}>${typeText}</color>`;
 }
 
-// One small, grey, low-emphasis line at the very end of the legend: which
-// version of this tool, which parser, what it parsed, and (parse-dxil
-// only) which dxc build compiled it - reproducibility/provenance info, not
+// One or two small, grey, low-emphasis lines at the very end of the
+// legend: which version of this tool, which parsing path produced the IR
+// (not the source file/path itself - just "source" or "dxil", so this
+// stays short regardless of how deep a project's directory tree is), and
+// (parse-dxil only, on its own line so it doesn't stretch the legend
+// width) which dxc build compiled it. Reproducibility/provenance info, not
 // something the reader needs to look at unless they're asking "where did
 // this diagram come from".
-function provenanceLine(theme, { packageVersion, generator, sourcePath, dxcVersion }) {
-    const parts = [`hlsl-workgraph-diagram${packageVersion ? ` v${packageVersion}` : ''}`];
-    if (generator) parts.push(generator);
-    if (sourcePath) parts.push(pumlEscape(sourcePath));
-    if (dxcVersion) parts.push(`dxc: ${pumlEscape(dxcVersion)}`);
-    return `<size:7><color:${theme.greyOne}>${parts.join(' · ')}</color></size>`;
+function provenanceLines(theme, { packageVersion, generator, dxcVersion }) {
+    const pathLabel = generator ? generator.replace(/^parse-/, '') : null;
+    const summary = [`hlsl-workgraph-diagram${packageVersion ? ` v${packageVersion}` : ''}`];
+    if (pathLabel) summary.push(`${pathLabel} parsing`);
+    const lines = [`<size:7><color:${theme.greyOne}>${summary.join(' · ')}</color></size>`];
+    if (dxcVersion) lines.push(`<size:7><color:${theme.greyOne}>dxc: ${pumlEscape(dxcVersion)}</color></size>`);
+    return lines;
 }
 
 module.exports = { renderNodeBlock, renderPlantUml };

@@ -135,25 +135,26 @@ async function resolveVariant(nameOrVersion) {
     return nameOrVersion; // explicit version string - existence is checked by the download itself
 }
 
-async function downloadNupkg(version) {
+async function downloadNupkg(version, log) {
     const url = `https://api.nuget.org/v3-flatcontainer/${PACKAGE_ID_LOWER}/${version}/${PACKAGE_ID_LOWER}.${version}.nupkg`;
-    console.error(`downloading ${url}`);
+    if (log) log.verbose(`GET ${url}`);
     return httpsGetBuffer(url);
 }
 
 // Installs an exact version (already resolved via resolveVariant()) at the
 // standard version-keyed cache location. Idempotent - skips the network
-// entirely if dxc.exe already exists there.
-async function ensureDxcInstalled(version) {
+// entirely if dxc.exe already exists there. `logger`: see ../common/logger.js.
+async function ensureDxcInstalled(version, logger) {
+    const log = logger || require('../common/logger').createLogger(false);
     const x64Dir = path.join(versionDir(version), 'x64');
     const dxcExe = dxcPathForVersion(version);
     if (fs.existsSync(dxcExe)) {
-        console.error(`already installed: ${x64Dir}`);
+        log.info(`already installed: ${x64Dir}`);
         return x64Dir;
     }
 
-    console.error(`installing dxc ${version} to ${x64Dir}`);
-    const nupkg = await downloadNupkg(version);
+    log.info(`installing dxc ${version} to ${x64Dir}`);
+    const nupkg = await downloadNupkg(version, log);
     const zip = openNupkg(nupkg);
 
     fs.mkdirSync(x64Dir, { recursive: true });
@@ -163,7 +164,7 @@ async function ensureDxcInstalled(version) {
         if (!data) throw new Error(`"${entryPath}" not found in the ${PACKAGE_ID} ${version} package`);
         const outPath = path.join(x64Dir, path.basename(entryPath));
         fs.writeFileSync(outPath, data);
-        console.error(`extracted ${entryPath} -> ${outPath} (${data.length} bytes)`);
+        log.verbose(`extracted ${entryPath} -> ${outPath} (${data.length} bytes)`);
     }
 
     // dxil.dll (the DXIL validator/signer) isn't shipped by every version -
@@ -173,9 +174,9 @@ async function ensureDxcInstalled(version) {
     const dxilData = zip.read('build/native/bin/x64/dxil.dll');
     if (dxilData) {
         fs.writeFileSync(path.join(x64Dir, 'dxil.dll'), dxilData);
-        console.error('extracted dxil.dll (validator available)');
+        log.verbose('extracted dxil.dll (validator available)');
     } else {
-        console.error('no dxil.dll in this package (fine - compiles will pass -Vd to skip validation)');
+        log.verbose('no dxil.dll in this package (fine - compiles will pass -Vd to skip validation)');
     }
 
     fs.writeFileSync(path.join(versionDir(version), 'meta.json'), JSON.stringify({ version, fetchedAt: new Date().toISOString() }, null, 2));

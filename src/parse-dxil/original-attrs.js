@@ -106,10 +106,28 @@ function splitParamsTopLevel(s) {
     return parts;
 }
 
+// A parameter's own HLSL variable name - the trailing identifier once its
+// leading `[Attr(...)]` blocks and its `Kind<Type>` are stripped, e.g.
+// `[MaxRecords(64)]\n[NodeID("X")]\nNodeOutput<Foo> workItemOutput` ->
+// "workItemOutput". dxc's debug info has no DW_TAG_arg_variable entries for
+// node function parameters (only DW_TAG_auto_variable, for locals declared
+// inside the body - confirmed against a real compile, see
+// docs/ir-format.md), so this is recovered from the same pre-preprocessor
+// source text as everything else here, not from debug info. Attribute
+// blocks are stripped with a non-nesting `[^\]]*` match, safe for every
+// attribute used on a parameter today (MaxRecords/NodeID/
+// MaxRecordsSharedWith args never themselves contain a `]`).
+function extractParamVarName(chunk) {
+    const withoutAttrs = chunk.replace(/\[[^\]]*\]/g, ' ');
+    const m = withoutAttrs.match(/([A-Za-z_]\w*)\s*$/);
+    return m ? m[1] : null;
+}
+
 // Recovers a node's original, unevaluated attribute expressions: its own
 // NumThreads/NodeDispatchGrid/NodeMaxDispatchGrid, and each I/O
-// parameter's MaxRecords, in declaration order (so callers can zip against
-// props.inputs/outputs the same way the debug-info parameter list is).
+// parameter's MaxRecords + variable name, in declaration order (so callers
+// can zip against props.inputs/outputs the same way the debug-info
+// parameter list is).
 function extractOriginalAttrs(fileContent, functionLine) {
     const attrBlock = extractLeadingAttributeBlock(fileContent, functionLine);
     const nodeLevel = {
@@ -122,7 +140,8 @@ function extractOriginalAttrs(fileContent, functionLine) {
     const inner = paramListText.startsWith('(') && paramListText.endsWith(')') ? paramListText.slice(1, -1) : paramListText;
     const ioParamChunks = splitParamsTopLevel(inner).filter((chunk) => NODE_IO_KIND_PATTERN.test(chunk));
     const ioMaxRecords = ioParamChunks.map((chunk) => extractAttrArgs(chunk, 'MaxRecords'));
-    return { nodeLevel, ioMaxRecords };
+    const ioVarNames = ioParamChunks.map(extractParamVarName);
+    return { nodeLevel, ioMaxRecords, ioVarNames };
 }
 
 module.exports = {
@@ -130,5 +149,6 @@ module.exports = {
     extractAttrArgs,
     extractParamListText,
     splitParamsTopLevel,
+    extractParamVarName,
     extractOriginalAttrs,
 };

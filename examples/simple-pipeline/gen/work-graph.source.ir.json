@@ -2,7 +2,7 @@
   "irVersion": 1,
   "generator": "parse-source",
   "generatorDetail": {
-    "rootDir": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\simple-pipeline",
+    "rootDir": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\simple-pipeline\\src",
     "nodeDirs": [
       "nodes-compute"
     ],

@@ -74,11 +74,18 @@ re-walk at render time. The full original text is still shown, just not further 
 | --- | --- | --- | --- |
 | `recordKind` | string\|null | e.g. `NodeOutput`, `ThreadNodeInputRecord` | same vocabulary, from debug info |
 | `recordType` | string\|null | ✓ | ✓ |
-| `varName` | string\|null | the parameter's own HLSL variable name | **always `null`** - this dxc build's debug info has zero `DW_TAG_arg_variable` entries for node function parameters, only `DW_TAG_auto_variable` for locals declared inside the body. No known workaround. |
+| `varName` | string\|null | the parameter's own HLSL variable name | recovered from source text (not debug info - see below), same as `parse-source` |
 | `linkedNodeID` | `{name, index}`\|null | outputs only - the `[NodeID(...)]` target (or var name) | same |
 | `maxRecords` | scalar\|null | ✓ | ✓ |
 | `maxRecordsSharedWith` | scalar\|null | outputs only, from `[MaxRecordsSharedWith(...)]` text | **always `null`** - the DXIL tag for this was never verified against a real compile (see `experimental/README.md`'s history) |
 | `recordFields` | `{name, sizeBits}[]`\|null | **always `null`** - v1 never resolves struct definitions | the record struct's field list, from debug info - richer here than parse-source, not currently rendered by build-puml |
+
+`varName` for `parse-dxil` isn't from debug info - this dxc build's debug info has zero `DW_TAG_arg_variable`
+entries for node function parameters (only `DW_TAG_auto_variable`, for locals declared *inside* the body).
+Recovered instead from the same pre-preprocessor source text as `maxRecords`'s original expression
+(`original-attrs.js`'s `extractParamVarName()`): each I/O parameter's raw declaration text, attribute
+blocks stripped, trailing identifier taken as the name. Verified against `examples/simple-pipeline`,
+`examples/mesh-culling`, and the fixture - matches source exactly in every case checked.
 
 ## Global
 
@@ -86,8 +93,16 @@ re-walk at render time. The full original text is still shown, just not further 
 | --- | --- | --- | --- |
 | `name` | string | ✓ | ✓ |
 | `resourceClass` | `SRV`\|`UAV`\|`CBV`\|`Sampler`\|null | derived from `regType` | from `!dx.resources`'s SRV/UAV/CBV/Sampler bucket |
-| `rw`, `kind`, `valueType`, `regType`, `regSlot`, `space` | various | from the `: register(tN)` declaration text | **always `null`** - `!dx.resources`' resource-table entry carries more than just the global reference and name, but only those two have been decoded/verified so far |
-| `file` | string\|null | declaring file | **always `null`** |
+| `regType`, `regSlot`, `space` | various | from the `: register(tN[, spaceM])` declaration text | from the resource metadata's shared base record (`[ID, GlobalVar, Name, Space, RangeStart, RangeSize, ...]` - documented common prefix across all four classes, confirmed against a real compile) |
+| `kind` | string\|null | the literal HLSL type name (`StructuredBuffer`, `ConstantBuffer`, ...) | for SRV/UAV: the DXIL `ResourceKind` enum name (`RESOURCE_KIND_NAMES` in `dxil-metadata.js` - documented in dxc's `DXIL.h`, confirmed here: a `StructuredBuffer<T>` produced literal `12`); for CBV/Sampler: fixed `'CBuffer'`/`'Sampler'` (not decoded positionally - untested whether those classes even carry a kind field at the same tuple index) |
+| `rw` | boolean | literal `RW` prefix in the source | **derived, not literal**: `resourceClass === 'UAV'` - exactly equivalent for every resource kind this tool models (a buffer is only ever compiled into the UAV class *because* it's read-write) |
+| `valueType` | string\|null | the `<T>` template argument text | the same, recovered by finding this specific global's own LLVM type annotation in the raw disassembly (`extractResourceValueType()`) and pulling the `<...>` out of it - not from the resource metadata tuple, which doesn't carry a friendly type name |
+| `file` | string\|null | declaring file | **always `null`** - would need a debug-info cross-reference (`!DIGlobalVariable`) not yet implemented |
+
+All of `kind`/`rw`/`valueType`/`regType`/`regSlot`/`space` for `parse-dxil` are verified against a real
+`StructuredBuffer<T>` SRV (the fixture's `itemMeta`) - CBuffer, Sampler, UAV (`RW...`), and array
+(`RangeSize > 1`) resources are implemented from the documented/inferred shared schema but not yet
+exercised against a real compile of one, since none of this repo's examples/fixture use them.
 
 **Global-set semantics differ, not just field richness**: `parse-source`'s `globals[]` lists *every*
 resource declared anywhere in the scanned tree, whether any node reads it or not (that's how the legend
@@ -101,31 +116,31 @@ about DCE) while `parse-dxil`'s IR has zero globals for that same example.
 
 ## Known differences between the two generators - a real comparison, not a hypothetical
 
-Run against `examples/simple-pipeline` and `examples/mesh-culling` (see the root README's "Two parsing
-paths" section for the exact commands). Every node/edge/launch-mode/dispatch-grid/thread-count/record-type/
-comment matched between the two `build-puml` outputs. The only diffs, and why:
+Run against `examples/simple-pipeline` and `examples/mesh-culling` (see each example's own `README.md` for
+the exact commands and rendered side-by-side comparison). Every node/edge/launch-mode/dispatch-grid/
+thread-count/record-type/comment/variable-name matched between the two `build-puml` outputs. The remaining
+diffs, and why:
 
-1. **Edge/record variable names are always missing from `parse-dxil`'s IR** (`varName: null` everywhere) -
-   see the Param table above. `--record-in-names`/`--record-out-names` and the edge note's variable-name
-   line have nothing to show for a `parse-dxil`-sourced IR.
-2. **`parse-dxil` reports a thread-launch node's effective `NumThreads` as `(1,1,1)` even when the HLSL
+1. **`parse-dxil` reports a thread-launch node's effective `NumThreads` as `(1,1,1)` even when the HLSL
    never wrote a `[NumThreads(...)]` attribute at all** (dxc synthesizes the tag for thread launch, where
    it's always exactly one thread per record); `parse-source` only reports `numThreads` when the attribute
    is textually present, so it renders `Threads: n/a` instead. Neither is wrong - one shows "what's written
    in the source," the other "what the compiler resolved for this shader stage."
-3. **`parse-dxil`'s `globals[]` can be smaller than `parse-source`'s** - see "Global-set semantics differ"
-   above.
-4. **A `parse-dxil` compile needs a real, single translation unit** - one entry `.hlsl` file that
+2. **`parse-dxil`'s `globals[]` can be smaller than `parse-source`'s** - see "Global-set semantics differ"
+   above. Confirmed on `examples/mesh-culling`: `parse-source` lists `objects` (marked used); `parse-dxil`
+   has zero globals for the same graph, since the only reference is dead-code-eliminated.
+3. **A `parse-dxil` compile needs a real, single translation unit** - one entry `.hlsl` file that
    `#include`s every node file it needs, the same as you'd hand `dxc` directly. Neither `examples/`
-   directory ships one (they're structured for `parse-source`'s directory-tree scan instead), so exercising
-   `parse-dxil` against them means writing a small umbrella file first. `parse-source` has no such
-   requirement - it walks the directory tree itself.
-5. **The mesh-vs-stable dxc build auto-selection only text-scans the entry file you pass, not its
+   directory's `src/` ships one on its own reasoning about `nodes-*` alone (they're structured for
+   `parse-source`'s directory-tree scan first), so each ships a small `WorkGraph.hlsl` umbrella file
+   specifically for `parse-dxil`. `parse-source` has no such requirement - it walks the directory tree
+   itself.
+4. **The mesh-vs-stable dxc build auto-selection only text-scans the entry file you pass, not its
    `#include`s** (see `parse-dxil/run-dxc.js`'s `looksLikeMeshGraph()`) - an umbrella file that only
    `#include`s a mesh node from elsewhere won't be detected, and dxc silently picks the non-mesh-capable
    build, failing later with `attribute 'NodeLaunch' must have one of these values: broadcasting,coalescing,
-   thread`. Pass `--dxc` explicitly (pointing at the build `setup-dxil --mesh` installed) to work around it.
+   thread`. Pass `--dxc-version mesh` explicitly (after `setup-dxil mesh`) to work around it.
 
-None of the above are bugs to "fix" blindly - #2 and #4 are inherent to what each approach actually is (a
-text scanner vs. a real compiler); #1, #3, #5 are real, narrowly-scoped gaps with a known cause, listed
-here instead of guessed at.
+None of the above are bugs to "fix" blindly - #1 and #3 are inherent to what each approach actually is (a
+text scanner vs. a real compiler); #2 and #4 are real, narrowly-scoped gaps with a known cause, listed here
+instead of guessed at.

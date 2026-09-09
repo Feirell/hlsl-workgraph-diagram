@@ -142,7 +142,8 @@ flags are added faster than docs sometimes keep up.
 | `--entry NAME` | every node | Restrict the compile to this node's export (`dxc -exports NAME`). Repeatable. |
 | `--dxc <path>` | - | Path to a `dxc.exe` to use directly, instead of one `setup-dxil` installed. |
 | `--dxc-version <mesh\|stable\|experimental\|version>` | auto-detected | Use the `dxc` version `setup-dxil` installed under this name/version. Ignored if `--dxc` is also given. Auto-detection (when neither is passed) is a plain text scan of `entryHLSLFile` for `NodeLaunch("mesh")` - not `#include`-aware, see `docs/ir-format.md`. |
-| `--keep-intermediate <dir>` | throwaway temp dir | Keep the compiled `.dxil` container and `-Fc` disassembly for inspection instead of deleting them after. |
+| `--keep-intermediate` | off | Keep the compiled `.dxil` container and `-Fc` disassembly (`<stem>.dxil`/`<stem>.dis.ll`) in the current working directory instead of a throwaway temp dir - e.g. to inspect them, or to reuse later with `--from-disassembly`. |
+| `--from-disassembly <file.dis.ll>` | - | Skip locating/invoking `dxc` entirely and parse an already-compiled disassembly directly - see [Generating the disassembly yourself](#generating-the-disassembly-yourself) below. `entryHLSLFile`/`--define`/`--entry`/`--dxc`/`--dxc-version`/`--keep-intermediate` are all ignored when this is given; the single positional becomes `outJsonFile` instead of `entryHLSLFile`. |
 
 **`build-puml`**:
 
@@ -168,99 +169,59 @@ flags are added faster than docs sometimes keep up.
 | `--server <url>` | `https://www.plantuml.com/plantuml` | PlantUML server base URL. Point this at a local/self-hosted instance for large diagrams - see [Rendering notes](#rendering-notes) below. |
 
 **Every command**: `--help`, `-h`, `-?` - print that command's usage and exit without touching the
-filesystem or network.
+filesystem or network. `--verbose`/`-v` - print per-file/per-node/per-global/per-edge detail as it's found,
+and the exact system commands issued (`dxc` invocations, HTTP requests, PNG/SVG writes), instead of just
+the terse summary counts.
+
+## Generating the disassembly yourself
+
+`parse-dxil --from-disassembly` lets you skip the compile step entirely - useful if you want to run `dxc`
+somewhere this tool doesn't control (a different machine, a custom build, extra flags), or just to reuse a
+disassembly you already have from `--keep-intermediate`. Compile with exactly this, and hand the resulting
+`-Fc` file to `--from-disassembly`:
+
+```sh
+dxc -T lib_6_8 -Zi -Qembed_debug -Vd -Fo out.dxil -Fc out.dis.ll YourEntryFile.hlsl
+
+hlsl-workgraph-diagram parse-dxil --from-disassembly out.dis.ll work-graph.ir.json
+```
+
+- `-T lib_6_8` - required target profile for work graphs.
+- `-Zi -Qembed_debug` - **not optional**: this is what embeds the original per-file source (comments,
+  un-expanded `#define` names, doc comments) into the compiled container, which `parse-dxil` depends on for
+  everything beyond the bare DXIL metadata (comments, original attribute expressions, record parameter
+  variable names). Omit it and those fields all come back `null`.
+- `-Vd` - skips the container validator. Omit it if your `dxc` build ships `dxil.dll` and you want the
+  compiled container validated (doesn't affect what `parse-dxil` can read either way).
+- `-Fc out.dis.ll` - the file to hand to `--from-disassembly`. `-Fo out.dxil` (the compiled container
+  itself) isn't read by this tool at all - only the disassembly is - but `dxc` still requires `-Fo` to be
+  given alongside `-Fc`.
+- Add `-D KEY=VALUE` for preprocessor defines, `-exports NAME` to restrict the compile to one node, exactly
+  as `--define`/`--entry` would have passed them through.
 
 ## Examples
 
 Two minimal, runnable work graphs live under [`examples/`](https://github.com/Feirell/hlsl-workgraph-diagram/tree/main/examples) - node skeletons only (attributes and
-records, no real compute logic), just enough HLSL for the tool to have something to diagram. Each ships
-both parsers' output side by side, `<parser>.` prefixed (`work-graph.source.*` from `parse-source`,
-`work-graph.dxil.*` from `parse-dxil`) - `.ir.json`, `.puml`, `.png`, and `.svg` each. Regenerate either
-example, either path, yourself with:
+records, no real compute logic), just enough HLSL for the tool to have something to diagram. Each is laid
+out `src/` (the HLSL, including a `WorkGraph.hlsl` umbrella file for `parse-dxil`) + `gen/` (both parsers'
+full output side by side: `work-graph.{source,dxil}.{ir.json,puml,png,svg}`) + its own `README.md`
+documenting the graph, the exact commands to reproduce `gen/`, and a side-by-side render comparison with
+every difference between the two parsers' output called out explicitly:
 
-```sh
-# parse-source path (works everywhere, no dxc needed)
-npx hlsl-workgraph-diagram parse-source examples/simple-pipeline examples/simple-pipeline/work-graph.source.ir.json
-npx hlsl-workgraph-diagram build-puml examples/simple-pipeline/work-graph.source.ir.json examples/simple-pipeline/work-graph.source.puml
-npx hlsl-workgraph-diagram puml-render examples/simple-pipeline/work-graph.source.puml
+- [`examples/simple-pipeline/`](https://github.com/Feirell/hlsl-workgraph-diagram/tree/main/examples/simple-pipeline) - the three main launch modes chained together (`broadcasting` → `thread` → `coalescing`).
+- [`examples/mesh-culling/`](https://github.com/Feirell/hlsl-workgraph-diagram/tree/main/examples/mesh-culling) - a `mesh`-launch node with a runtime dispatch grid, reading a global `StructuredBuffer` resource.
 
-# parse-dxil path (needs setup-dxil first - see Usage above). Each example ships its own
-# WorkGraph.hlsl umbrella file (#includes every node) for dxc to compile.
-npx hlsl-workgraph-diagram parse-dxil examples/simple-pipeline/WorkGraph.hlsl examples/simple-pipeline/work-graph.dxil.ir.json
-npx hlsl-workgraph-diagram build-puml examples/simple-pipeline/work-graph.dxil.ir.json examples/simple-pipeline/work-graph.dxil.puml
-npx hlsl-workgraph-diagram puml-render examples/simple-pipeline/work-graph.dxil.puml
-```
+![Simple pipeline diagram: EntryNode (broadcasting) feeds GenerateNode (thread), which feeds CollectNode (coalescing)](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/simple-pipeline/gen/work-graph.source.png)
 
-`examples/mesh-culling` needs `--global-boxes` on both `build-puml` calls (to match the rendered images
-below), and its `parse-dxil` call needs an explicit `--dxc-version mesh` - its `WorkGraph.hlsl` reaches
-the mesh node through an `#include`, which the auto-detection heuristic doesn't see (a real, documented
-limitation - see `docs/ir-format.md`).
+*(`examples/simple-pipeline`, via `parse-source` - see that example's own README for the `parse-dxil`
+render and the one line that differs between them)*
 
-### 1. `examples/simple-pipeline/` - the three main launch modes chained together
-
-A `broadcasting` entry node fans out work items to a `thread`-launch node, which each produce one result
-gathered by a `coalescing` node:
-
-```hlsl
-// examples/simple-pipeline/nodes-compute/GenerateNode.hlsl
-[Shader("node")]
-[NodeLaunch("thread")]
-void GenerateNode(
-    ThreadNodeInputRecord<WorkItemRecord> inputRecord,
-
-    [MaxRecords(1)]
-    [NodeID("CollectNode")]
-    NodeOutput<ResultRecord> resultOutput
-)
-{
-    ThreadNodeOutputRecords<ResultRecord> result = resultOutput.GetThreadNodeOutputRecords(1);
-    result.OutputComplete();
-}
-```
-
-![Simple pipeline diagram: EntryNode (broadcasting) feeds GenerateNode (thread), which feeds CollectNode (coalescing)](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/simple-pipeline/work-graph.source.png)
-
-*(via `parse-source`: [`.puml`](https://github.com/Feirell/hlsl-workgraph-diagram/blob/main/examples/simple-pipeline/work-graph.source.puml) · [full-res `.svg`](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/simple-pipeline/work-graph.source.svg) — via `parse-dxil`: [`.puml`](https://github.com/Feirell/hlsl-workgraph-diagram/blob/main/examples/simple-pipeline/work-graph.dxil.puml) · [full-res `.svg`](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/simple-pipeline/work-graph.dxil.svg))*
-
-### 2. `examples/mesh-culling/` - a mesh-launch node reading a global resource
-
-A `broadcasting` node reads an object-count `StructuredBuffer` global and dispatches a `mesh`-launch node
-with a runtime-determined (`NodeMaxDispatchGrid`) dispatch grid - rendered here with `--global-boxes` to
-show the global resource as its own box with a dashed edge into the node that reads it:
-
-```hlsl
-// examples/mesh-culling/nodes-mesh/RenderMeshNode.hlsl
-[Shader("node")]
-[NodeLaunch("mesh")]
-[NodeMaxDispatchGrid(64, 1, 1)]
-[NumThreads(RMN_THREADS, 1, 1)]
-[OutputTopology("triangle")]
-void RenderMeshNode(
-    uint gtid : SV_GroupThreadID,
-
-    DispatchNodeInputRecord<MeshInputRecord> inputRecord,
-
-    out indices  uint3  triangles[64],
-    out vertices Vertex verts[64]
-)
-{
-}
-```
-
-![Mesh culling diagram: a StructuredBuffer global feeds EntryNode and CullNode (broadcasting), which feeds RenderMeshNode (mesh, dashed border for its dynamic dispatch grid)](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/mesh-culling/work-graph.source.png)
-
-*(via `parse-source`: [`.puml`](https://github.com/Feirell/hlsl-workgraph-diagram/blob/main/examples/mesh-culling/work-graph.source.puml) · [full-res `.svg`](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/mesh-culling/work-graph.source.svg) — via `parse-dxil`: [`.puml`](https://github.com/Feirell/hlsl-workgraph-diagram/blob/main/examples/mesh-culling/work-graph.dxil.puml) · [full-res `.svg`](https://raw.githubusercontent.com/Feirell/hlsl-workgraph-diagram/main/examples/mesh-culling/work-graph.dxil.svg) — note: `parse-dxil`'s version has no `objects` global box at all, not just an unused one; see below)*
-
-Both diagrams show what the tool infers purely from these attribute lists: launch mode (box colour),
-depth from the graph entry, dispatch grid/thread-group size (with `#define`d constants like
-`RMN_THREADS` resolved to their numeric value), and the record types/counts flowing along each edge - none
-of it hand-authored, all of it read back out of the HLSL above. Both examples parse to the same graph
-structure via `parse-dxil` too - the one real difference between the two rendered diagrams here is
-`mesh-culling`'s `objects` `StructuredBuffer`: `CullNode` only reads it through a `GetDimensions()` call
-whose result is never used, so dxc's optimizer eliminates the read entirely and `parse-dxil` never sees it
-at all (`parse-source`'s text scan still finds and lists it, correctly marked used). See
-`docs/ir-format.md`'s "Known differences" section for this and the couple of other verified gaps between
-the two parsers (mainly: `parse-dxil` can't recover a record parameter's own variable name).
+Both examples show what the tool infers purely from HLSL attribute lists: launch mode (box colour), depth
+from the graph entry, dispatch grid/thread-group size (with `#define`d constants resolved to their numeric
+value), and the record types/counts/variable-names flowing along each edge - none of it hand-authored, all
+of it read back out of the source (or, via `parse-dxil`, the compiled DXIL). See each example's own
+`README.md` for the full side-by-side comparison and every verified difference between the two parsers -
+`docs/ir-format.md`'s "Known differences" section is the same list without the pictures.
 
 ## Migrating from v1
 
@@ -327,9 +288,9 @@ parser. It has been verified against real Work Graph shader trees, but the follo
   scoping
 
 **`parse-dxil`** compiles with a real preprocessor and compiler, so none of the above apply to it - but it
-has its own gaps (needing `dxc`, needing a single `#include`-everything entry file, missing record variable
-names, a narrower view of "used" globals) - see [`docs/ir-format.md`](docs/ir-format.md)'s "Known
-differences" section for the full, verified list.
+has its own gaps (needing `dxc`, needing a single `#include`-everything entry file, a narrower view of
+"used" globals) - see [`docs/ir-format.md`](docs/ir-format.md)'s "Known differences" section for the full,
+verified list.
 
 **Both parsers**: mesh-shader `out indices`/`out vertices`/`out primitives` parameters are recognized but
 never turned into graph edges (they're rasterizer outputs, not work-graph node-to-node records).
@@ -356,7 +317,8 @@ fixtures/
   dxil-parser-fixture/   a small HLSL work graph used to develop/verify parse-dxil (broadcasting -> thread
                          -> coalescing, plus an optional mesh node; deliberately encodes edge cases like
                          #define-resolution and #if-0 dead code)
-examples/        the two runnable examples referenced above
+examples/        the two runnable examples referenced above, each: src/ (HLSL) + gen/ (both parsers'
+                 output) + README.md (documented, reproducible, with a side-by-side render comparison)
 experimental/    narrative research notes from the dxc-based-parsing spike that became parse-dxil/setup-dxil
                  - historical record of what was tried and verified, not something you need to read to use
                  the tool

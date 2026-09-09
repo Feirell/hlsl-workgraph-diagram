@@ -7,6 +7,8 @@
 // ---------------------------------------------------------------------------
 'use strict';
 
+const { VERBOSE_SPEC } = require('../common/cli-args');
+
 // CLI flag definitions for `build-puml` - every rendering-choice flag the
 // pre-split tool had *except* --render/--no-render/--server/--scale (those
 // moved to puml-render: --scale is inserted into the .puml text on the fly
@@ -26,6 +28,7 @@ const SPECS = [
     { name: 'globalListEnabled', flag: '--global-list', negFlag: '--no-global-list', type: 'boolean', default: true },
     { name: 'recordInNamesEnabled', flag: '--record-in-names', negFlag: '--no-record-in-names', type: 'boolean', default: false },
     { name: 'recordOutNamesEnabled', flag: '--record-out-names', negFlag: '--no-record-out-names', type: 'boolean', default: false },
+    VERBOSE_SPEC,
 ];
 
 // Resolves the raw parsed flag values into the final opts object

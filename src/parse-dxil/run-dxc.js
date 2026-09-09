@@ -119,15 +119,22 @@ function getDxcVersionString(dxcExe) {
 // is the parsed { rawMap, named, text } shape disassembly.js's
 // loadDisassembly() produces. `defines`: array of "KEY=VALUE" strings.
 // `exportNames`: array of node function names to restrict the compile to
-// (dxc `-exports`), or empty for "every node in the file".
-// `keepIntermediate`: directory to leave the compiled .dxil/.ll in for
-// inspection, or null to use a throwaway temp dir cleaned up after.
-function compileToDisassembly(entryFile, { dxcPath, dxcVersion, defines = [], exportNames = [], keepIntermediate = null } = {}) {
+// (dxc `-exports`), or empty for "every node in the file". `keepIntermediate`
+// (boolean): leave the compiled `.dxil`/`.dis.ll` in the current working
+// directory instead of a throwaway temp dir cleaned up after - e.g. to hand
+// them to `--from-disassembly` on a later run, or to another machine
+// (see the root README's "Generating the disassembly yourself" section).
+// `logger`: see ../common/logger.js - `logger.verbose()` gets the exact
+// dxc command line; without --verbose, only the summary lines in index.js
+// print.
+function compileToDisassembly(entryFile, { dxcPath, dxcVersion, defines = [], exportNames = [], keepIntermediate = false, logger } = {}) {
+    const log = logger || require('../common/logger').createLogger(false);
     const dxcExe = locateDxc({ dxcPath, dxcVersion }, entryFile);
+    log.verbose(`Using dxc: ${dxcExe}`);
     const dxcDir = path.dirname(dxcExe);
     const hasValidator = fs.existsSync(path.join(dxcDir, 'dxil.dll'));
 
-    const workDir = keepIntermediate || fs.mkdtempSync(path.join(os.tmpdir(), 'hlsl-workgraph-dxil-'));
+    const workDir = keepIntermediate ? process.cwd() : fs.mkdtempSync(path.join(os.tmpdir(), 'hlsl-workgraph-dxil-'));
     fs.mkdirSync(workDir, { recursive: true });
     const stem = path.basename(entryFile).replace(/\.[^.]+$/, '');
     const dxilOut = path.join(workDir, `${stem}.dxil`);
@@ -141,8 +148,12 @@ function compileToDisassembly(entryFile, { dxcPath, dxcVersion, defines = [], ex
     args.push('-Fo', dxilOut, '-Fc', disOut, entryFile);
 
     const { cmd, prefixArgs } = runnerFor(dxcExe);
-    console.error(`+ ${[cmd, ...prefixArgs, ...args].join(' ')}`);
+    log.verbose(`+ ${[cmd, ...prefixArgs, ...args].join(' ')}`);
     execFileSync(cmd, [...prefixArgs, ...args], { stdio: 'inherit' });
+    if (keepIntermediate) {
+        log.info(`Kept compiled container: ${dxilOut}`);
+        log.info(`Kept disassembly:        ${disOut}`);
+    }
 
     const { loadDisassembly } = require('./disassembly');
     const dis = loadDisassembly(disOut);

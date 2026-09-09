@@ -54,7 +54,8 @@ function plantumlEncode(text) {
     return r;
 }
 
-function fetchBinary(url) {
+function fetchBinary(url, log) {
+    if (log) log.verbose(`GET ${url}`);
     return new Promise((resolve, reject) => {
         const mod = url.startsWith('https:') ? https : http;
         mod
@@ -109,15 +110,15 @@ function delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchBinaryWithRetry(url, attempts, backoffMs) {
+async function fetchBinaryWithRetry(url, attempts, backoffMs, log) {
     let lastErr;
     for (let i = 0; i < attempts; i++) {
         try {
-            return await fetchBinary(url);
+            return await fetchBinary(url, log);
         } catch (err) {
             lastErr = err;
             if (i < attempts - 1) {
-                console.error(`  retrying (${i + 2}/${attempts}) after: ${err.message}`);
+                if (log) log.verbose(`  retrying (${i + 2}/${attempts}) after: ${err.message}`);
                 await delay(backoffMs);
             }
         }
@@ -125,14 +126,17 @@ async function fetchBinaryWithRetry(url, attempts, backoffMs) {
     throw lastErr;
 }
 
-async function renderWithPlantumlServer(pumlText, outBase, serverBase) {
+async function renderWithPlantumlServer(pumlText, outBase, serverBase, logger) {
+    const log = logger || require('../common/logger').createLogger(false);
     const encoded = plantumlEncode(pumlText);
     const [png, svg] = await Promise.all([
-        fetchBinaryWithRetry(`${serverBase}/png/${encoded}`, 3, 1500),
-        fetchBinaryWithRetry(`${serverBase}/svg/${encoded}`, 3, 1500),
+        fetchBinaryWithRetry(`${serverBase}/png/${encoded}`, 3, 1500, log),
+        fetchBinaryWithRetry(`${serverBase}/svg/${encoded}`, 3, 1500, log),
     ]);
     fs.writeFileSync(`${outBase}.png`, png);
+    log.verbose(`Wrote ${outBase}.png (${png.length} bytes)`);
     fs.writeFileSync(`${outBase}.svg`, svg);
+    log.verbose(`Wrote ${outBase}.svg (${svg.length} bytes)`);
 
     // Most PlantUML servers cap PNG output at a fixed pixel limit per
     // dimension (PLANTUML_LIMIT_SIZE, commonly 4096) and silently crop
@@ -155,7 +159,7 @@ async function renderWithPlantumlServer(pumlText, outBase, serverBase) {
         svgDims &&
         (pngDims.width < svgDims.width - CROP_TOLERANCE_PX || pngDims.height < svgDims.height - CROP_TOLERANCE_PX)
     ) {
-        console.error(
+        log.info(
             `Warning: the rendered .png (${pngDims.width}x${pngDims.height}) is smaller than the diagram's ` +
                 `actual size (${svgDims.width}x${svgDims.height}, per the .svg) - it looks like the PlantUML ` +
                 'server cropped it against its own pixel-size limit (commonly PLANTUML_LIMIT_SIZE=4096) ' +

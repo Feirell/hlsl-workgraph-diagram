@@ -27,7 +27,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const { parseArgs } = require('../common/cli-args');
+const { parseArgs, VERBOSE_SPEC } = require('../common/cli-args');
+const { createLogger } = require('../common/logger');
 const { renderWithPlantumlServer } = require('./plantuml-server');
 
 function printHelp() {
@@ -49,6 +50,8 @@ Options:
                           affects its declared width/height. Default: 2.
   --server <url>          PlantUML server base URL.
                            Default: https://www.plantuml.com/plantuml
+  --verbose, -v           Print the exact request URLs, retry attempts, and
+                          bytes written, instead of just the summary line.
   --help, -h, -?          Show this help text and exit.
 `);
 }
@@ -72,11 +75,13 @@ async function run(argv) {
     const { values, positionals, help } = parseArgs(argv, [
         { name: 'scale', flag: '--scale', type: 'number', default: 2 },
         { name: 'server', flag: '--server', type: 'string', default: 'https://www.plantuml.com/plantuml' },
+        VERBOSE_SPEC,
     ]);
     if (help) {
         printHelp();
         return;
     }
+    const log = createLogger(values.verbose);
 
     const inArg = positionals[0] || 'work-graph.puml';
     const inFile = path.resolve(/\.puml$/i.test(inArg) ? inArg : `${inArg}.puml`);
@@ -85,15 +90,15 @@ async function run(argv) {
 
     const scale = Number.isFinite(values.scale) && values.scale > 0 ? values.scale : 2;
     if (values.scale !== scale) {
-        console.error(`Warning: ignoring invalid --scale value (${values.scale}); using ${scale} instead.`);
+        log.info(`Warning: ignoring invalid --scale value (${values.scale}); using ${scale} instead.`);
     }
 
     const puml = withScale(fs.readFileSync(inFile, 'utf8'), scale);
     try {
-        await renderWithPlantumlServer(puml, outBase, server);
-        console.error(`Rendered ${outBase}.png and ${outBase}.svg via ${server}`);
+        await renderWithPlantumlServer(puml, outBase, server, log);
+        log.info(`Rendered ${outBase}.png and ${outBase}.svg via ${server}`);
     } catch (err) {
-        console.error(
+        log.info(
             `Warning: PlantUML server rendering failed (${err.message}). ` +
                 'The .puml file itself is unaffected - this is a rendering-service limitation, not a syntax ' +
                 'error. For a large/detailed diagram, the public PlantUML server has been observed to fail past ' +

@@ -2,7 +2,8 @@
   "irVersion": 1,
   "generator": "parse-dxil",
   "generatorDetail": {
-    "entryFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\mesh-culling\\WorkGraph.hlsl",
+    "entryFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\mesh-culling\\src\\WorkGraph.hlsl",
+    "fromDisassembly": null,
     "defines": [],
     "exportNames": [],
     "dxcExe": "C:\\Users\\User\\.hlsl-workgraph-diagram\\dxc\\1.8.2404.55-mesh-nodes-preview\\x64\\dxc.exe",
@@ -14,7 +15,7 @@
       "nodeIdIndex": 0,
       "functionName": "CullNode",
       "group": "nodes-compute",
-      "sourceFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\mesh-culling/nodes-compute/CullNode.hlsl",
+      "sourceFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\mesh-culling\\src/nodes-compute/CullNode.hlsl",
       "sourceLine": 21,
       "comment": "Reads the object buffer (no actual culling logic here - this is a\ndiagram skeleton) and emits one mesh-launch record per thread group for\nRenderMeshNode to consume.",
       "isEntry": false,
@@ -50,7 +51,7 @@
         {
           "recordKind": "DispatchNodeInputRecord",
           "recordType": "DispatchRecord",
-          "varName": null,
+          "varName": "inputRecord",
           "linkedNodeID": null,
           "maxRecords": null,
           "maxRecordsSharedWith": null,
@@ -66,7 +67,7 @@
         {
           "recordKind": "NodeOutput",
           "recordType": "MeshInputRecord",
-          "varName": null,
+          "varName": "meshOutput",
           "linkedNodeID": {
             "name": "RenderMeshNode",
             "index": 0
@@ -96,7 +97,7 @@
       "nodeIdIndex": 0,
       "functionName": "EntryNode",
       "group": "nodes-compute",
-      "sourceFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\mesh-culling/nodes-compute/EntryNode.hlsl",
+      "sourceFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\mesh-culling\\src/nodes-compute/EntryNode.hlsl",
       "sourceLine": 17,
       "comment": "Graph entry point: hands a single dispatch record to CullNode.",
       "isEntry": true,
@@ -133,7 +134,7 @@
         {
           "recordKind": "NodeOutput",
           "recordType": "DispatchRecord",
-          "varName": null,
+          "varName": "dispatchOutput",
           "linkedNodeID": {
             "name": "CullNode",
             "index": 0
@@ -159,7 +160,7 @@
       "nodeIdIndex": 0,
       "functionName": "RenderMeshNode",
       "group": "nodes-mesh",
-      "sourceFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\mesh-culling/nodes-mesh/RenderMeshNode.hlsl",
+      "sourceFile": "C:\\Users\\User\\projects\\hlsl-workgraph-diagram\\examples\\mesh-culling\\src/nodes-mesh/RenderMeshNode.hlsl",
       "sourceLine": 20,
       "comment": "Mesh-launch node: rasterizes up to 64 triangles per thread group.",
       "isEntry": false,
@@ -195,7 +196,7 @@
         {
           "recordKind": "DispatchNodeInputRecord",
           "recordType": "MeshInputRecord",
-          "varName": null,
+          "varName": "inputRecord",
           "linkedNodeID": null,
           "maxRecords": null,
           "maxRecordsSharedWith": null,

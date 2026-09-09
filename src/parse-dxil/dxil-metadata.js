@@ -204,23 +204,90 @@ function extractLeadingComment(fileContent, functionLine) {
     return collected.length ? collected.join('\n').trim() : null;
 }
 
-function getResources(resolveId, named) {
+// DXIL "ResourceKind" enum - documented in dxc's DXIL.h and the DirectX
+// Specs' DXIL Resource page, and empirically confirmed here: a plain
+// StructuredBuffer<T> global compiled from this repo's own fixture
+// produced literal `i32 12` at this exact tuple position, matching
+// kStructuredBuffer below. Only used for SRV/UAV entries (see
+// getResources()) - CBuffer/Sampler resource records don't carry a
+// ResourceKind at the equivalent position.
+const RESOURCE_KIND_NAMES = {
+    0: null, // Invalid
+    1: 'Texture1D',
+    2: 'Texture2D',
+    3: 'Texture2DMS',
+    4: 'Texture3D',
+    5: 'TextureCube',
+    6: 'Texture1DArray',
+    7: 'Texture2DArray',
+    8: 'Texture2DMSArray',
+    9: 'TextureCubeArray',
+    10: 'TypedBuffer',
+    11: 'RawBuffer',
+    12: 'StructuredBuffer',
+    13: 'CBuffer',
+    14: 'Sampler',
+    15: 'TBuffer',
+    16: 'RTAccelerationStructure',
+    17: 'FeedbackTexture2D',
+    18: 'FeedbackTexture2DArray',
+};
+
+// The friendly element/value type name (e.g. "ItemMeta" out of
+// "StructuredBuffer<ItemMeta>") isn't in the resource metadata tuple
+// itself - recovered instead by finding this specific global's own
+// declaration in the raw disassembly text, which spells out its full LLVM
+// type name including the original HLSL template argument (dxc's LLVM
+// type-naming happens to preserve it verbatim, unlike the mangled name).
+// mangledName must be the exact `@"..."` global reference text (already
+// escaped for regex use).
+function extractResourceValueType(disText, mangledName) {
+    if (!mangledName) return null;
+    const escaped = mangledName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`%"(?:class|struct)\\.([^"]*)"\\*\\s*bitcast\\s*\\(%dx\\.types\\.Handle\\*\\s*@"${escaped}"`);
+    const m = disText.match(re);
+    if (!m) return null;
+    const templateMatch = m[1].match(/<(.+)>$/);
+    return templateMatch ? templateMatch[1] : null;
+}
+
+// Decodes the shared "resource base record" prefix - [ID, GlobalVariable,
+// Name, Space, RangeStart (register slot), RangeSize] - documented as
+// common to all four resource classes (SRV/UAV/CBV/Sampler) in the DXIL
+// resource metadata schema, and what every class's entry has been
+// confirmed to start with against a real compile here (SRV). RangeSize > 1
+// means a resource array, not modeled further (this repo's fixtures never
+// exercise one) - space/regSlot/regType/name/globalVariable are populated
+// regardless.
+function getResources(resolveId, named, disText) {
     const ids = named.get('dx.resources') || [];
     if (ids.length === 0) return null;
     const resourceLists = resolveId(ids[0]); // [SRVs, UAVs, CBVs, Samplers]
     if (!Array.isArray(resourceLists)) return null;
     const classes = ['SRV', 'UAV', 'CBV', 'Sampler'];
+    const regTypeByClass = { SRV: 't', UAV: 'u', CBV: 'b', Sampler: 's' };
+    const fixedKindByClass = { CBV: 'CBuffer', Sampler: 'Sampler' };
     const resources = [];
     resourceLists.forEach((list, classIdx) => {
         if (!Array.isArray(list)) return;
+        const resourceClass = classes[classIdx];
         for (const entry of list) {
             if (!Array.isArray(entry)) continue;
             const globalRef = entry.find((e) => e && typeof e === 'object' && e.$func);
             const name = entry.find((e) => typeof e === 'string');
+            const [, , , space, rangeStart, , resourceKindRaw] = entry;
+            const kind =
+                fixedKindByClass[resourceClass] ||
+                (typeof resourceKindRaw === 'number' ? RESOURCE_KIND_NAMES[resourceKindRaw] || `unknown(${resourceKindRaw})` : null);
             resources.push({
-                resourceClass: classes[classIdx],
+                resourceClass,
                 globalVariable: globalRef ? globalRef.$func : null,
                 name: name || null,
+                regType: regTypeByClass[resourceClass] || null,
+                regSlot: typeof rangeStart === 'number' ? rangeStart : null,
+                space: typeof space === 'number' ? space : null,
+                kind,
+                valueType: disText && globalRef ? extractResourceValueType(disText, globalRef.$func) : null,
                 raw: entry,
             });
         }
@@ -251,6 +318,7 @@ function findGlobalsUsed(disText, funcName, resources) {
 module.exports = {
     PROP_TAGS,
     LAUNCH_TYPES,
+    RESOURCE_KIND_NAMES,
     NODE_IO_KINDS,
     NODE_IO_KIND_PATTERN,
     decodeIORecord,
@@ -260,6 +328,7 @@ module.exports = {
     normalizePath,
     getSourceFiles,
     extractLeadingComment,
+    extractResourceValueType,
     getResources,
     extractFunctionBody,
     findGlobalsUsed,

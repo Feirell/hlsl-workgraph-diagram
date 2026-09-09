@@ -37,10 +37,12 @@ package "nodes-compute" {
 EntryNode --> GenerateNode
 note on link
   <i><color:#8E44AD><<WorkItemRecord>></color></i> (64)
+  <size:8>workItemOutput</size>
 end note
 GenerateNode --> CollectNode
 note on link
   <i><color:#8E44AD><<ResultRecord>></color></i> (1)
+  <size:8>resultOutput</size>
 end note
 
 legend right
@@ -54,6 +56,7 @@ legend right
   Dashed border = grid can expand to >1 thread group per invocation
   (NodeMaxDispatchGrid, or NodeDispatchGrid != (1,1,1)); solid border = always
   exactly one group (NodeDispatchGrid(1,1,1), thread launch, or coalescing)
-  <size:7><color:#8A8A8A>hlsl-workgraph-diagram v2.0.0 · parse-dxil · C:\Users\User\projects\hlsl-workgraph-diagram\examples\simple-pipeline\WorkGraph.hlsl · dxc: dxcompiler.dll: 1.9(5402-0d3ee6b5)(1.9.0.5402) - 1.9.0.5402 (0d3ee6b55-dirty)</color></size>
+  <size:7><color:#8A8A8A>hlsl-workgraph-diagram v2.0.0 · dxil parsing</color></size>
+  <size:7><color:#8A8A8A>dxc: dxcompiler.dll: 1.9(5402-0d3ee6b5)(1.9.0.5402) - 1.9.0.5402 (0d3ee6b55-dirty)</color></size>
 endlegend
 @enduml

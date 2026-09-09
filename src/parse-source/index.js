@@ -21,7 +21,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const { parseArgs } = require('../common/cli-args');
+const { parseArgs, VERBOSE_SPEC } = require('../common/cli-args');
+const { createLogger } = require('../common/logger');
 const { writeIrFile } = require('../common/ir');
 const { findNodeDirs, listHlslFiles } = require('./discovery');
 const { stripComments } = require('./comments');
@@ -47,34 +48,38 @@ Arguments:
                   directory.
 
 Options:
+  --verbose, -v    Print per-file/per-node/per-global detail as it's found,
+                    instead of just the final summary counts.
   --help, -h, -?   Show this help text and exit.
 `);
 }
 
 function run(argv) {
-    const { positionals, help } = parseArgs(argv, []);
+    const { values, positionals, help } = parseArgs(argv, [VERBOSE_SPEC]);
     if (help) {
         printHelp();
         return;
     }
+    const log = createLogger(values.verbose);
 
     const rootDir = path.resolve(positionals[0] || process.cwd());
     const outArg = positionals[1] || 'work-graph.ir.json';
     const outFile = path.resolve(/\.json$/i.test(outArg) ? outArg : `${outArg}.json`);
 
-    console.error(`Searching for nodes-* directories under: ${rootDir}`);
+    log.info(`Searching for nodes-* directories under: ${rootDir}`);
     const nodeDirs = findNodeDirs(rootDir);
     if (nodeDirs.length === 0) {
-        console.error(`No "nodes-*" directories found under ${rootDir}`);
+        log.info(`No "nodes-*" directories found under ${rootDir}`);
         process.exitCode = 1;
         return;
     }
-    console.error(
+    log.info(
         `Found ${nodeDirs.length} nodes-* director${nodeDirs.length === 1 ? 'y' : 'ies'}: ` +
             nodeDirs.map((d) => path.relative(rootDir, d) || '.').join(', ')
     );
 
     const table = collectConstants(rootDir);
+    log.verbose(`Collected ${table.size} constant(s) from #define/static const across the tree.`);
 
     const files = [];
     for (const nodesDir of nodeDirs) {
@@ -85,6 +90,7 @@ function run(argv) {
 
     const allNodes = [];
     for (const { file, group } of files) {
+        log.verbose(`Scanning ${file} (group: ${group})`);
         const raw = fs.readFileSync(file, 'utf8');
         const { text: stripped, rawIndex } = stripComments(raw);
         const relPath = path.relative(rootDir, file).replace(/\\/g, '/');
@@ -93,18 +99,27 @@ function run(argv) {
         // is to extract everything it can into the IR, not to decide what
         // build-puml will later choose to display.
         const nodes = extractNodes(stripped, relPath, raw, rawIndex, group, true);
+        for (const n of nodes) {
+            log.verbose(
+                `  found node "${n.id}" (${n.functionName}): ${n.launchMode || 'unknown'} launch, ` +
+                    `${n.inputs.length} input(s), ${n.outputs.length} output(s)`
+            );
+        }
         allNodes.push(...nodes);
     }
 
     const nodesById = new Map();
     for (const n of allNodes) {
         if (nodesById.has(n.id)) {
-            console.error(`Warning: duplicate node id "${n.id}" (${nodesById.get(n.id).file} and ${n.file})`);
+            log.info(`Warning: duplicate node id "${n.id}" (${nodesById.get(n.id).file} and ${n.file})`);
         }
         nodesById.set(n.id, n);
     }
 
     const globalsIndex = collectGlobals(rootDir);
+    for (const g of globalsIndex.values()) {
+        log.verbose(`Found global "${g.name}" (${g.kind}) at ${g.regType}${g.regSlot} in ${g.file}`);
+    }
     if (globalsIndex.size > 0) {
         // Pre-sorted once by (regType, regSlot) - "t3 before t5" - so every
         // node's filtered globalsUsed list inherits that order for free.
@@ -121,7 +136,7 @@ function run(argv) {
     }
 
     const edgeCount = allNodes.reduce((sum, n) => sum + n.outputs.length, 0);
-    console.error(
+    log.info(
         `Scanned ${files.length} file(s), found ${allNodes.length} node function(s), ${edgeCount} edge(s), ${globalsIndex.size} global resource(s).`
     );
 
@@ -131,7 +146,7 @@ function run(argv) {
         filesScanned: files.length,
     });
     writeIrFile(outFile, ir);
-    console.error(`Wrote ${outFile}`);
+    log.info(`Wrote ${outFile}`);
 }
 
 module.exports = { run, printHelp };

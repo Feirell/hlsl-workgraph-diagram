@@ -22,6 +22,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { parseArgs } = require('../common/cli-args');
+const { createLogger } = require('../common/logger');
 const { readIrFile } = require('../common/ir');
 const { computeDepths } = require('./graph');
 const { renderPlantUml } = require('./document');
@@ -75,6 +76,9 @@ Options:
                                    parse-source's IR - see docs/ir-format.md.
   --record-out-names / --no-record-out-names
                                    Same, for "Record out:". Default: off.
+  --verbose, -v                    Print each node/edge/global found, and
+                                    its computed depth, instead of just the
+                                    summary counts.
   --help, -h, -?                   Show this help text and exit.
 `);
 }
@@ -85,6 +89,7 @@ function run(argv) {
         printHelp();
         return;
     }
+    const log = createLogger(values.verbose);
 
     const inArg = positionals[0] || 'work-graph.ir.json';
     const inFile = path.resolve(/\.json$/i.test(inArg) ? inArg : `${inArg}.json`);
@@ -96,7 +101,9 @@ function run(argv) {
     const ir = readIrFile(inFile);
     const nodes = ir.nodes || [];
     const globals = ir.globals || [];
-    console.error(`Loaded ${nodes.length} node(s), ${globals.length} global resource(s) from ${inFile} (generator: ${ir.generator}).`);
+    log.info(`Loaded ${nodes.length} node(s), ${globals.length} global resource(s) from ${inFile} (generator: ${ir.generator}).`);
+    for (const n of nodes) log.verbose(`  node "${n.id}" (${n.functionName}): ${n.launchMode || 'unknown'}, group=${n.group || '(none)'}`);
+    for (const g of globals) log.verbose(`  global "${g.name}" (${g.kind || g.resourceClass || '?'}) at ${g.regType || '?'}${g.regSlot != null ? g.regSlot : '?'}`);
 
     const nodesById = new Map(nodes.map((n) => [n.id, n]));
 
@@ -116,27 +123,29 @@ function run(argv) {
             });
         }
     }
+    for (const e of edges) log.verbose(`  edge ${e.from} -> ${e.to}${e.recordType ? ` (${e.recordType})` : ''}`);
 
     const externalIds = new Set();
     for (const e of edges) {
         if (!nodesById.has(e.to)) externalIds.add(e.to);
     }
+    for (const id of externalIds) log.verbose(`  external/unresolved reference: ${id}`);
 
     const depths = computeDepths(nodes, edges);
     for (const n of nodes) n.depth = depths.has(n.id) ? depths.get(n.id) : null;
+    for (const n of nodes) log.verbose(`  depth(${n.id}) = ${n.depth == null ? '?' : n.depth}`);
 
-    console.error(`${edges.length} edge(s), ${externalIds.size} external reference(s).`);
+    log.info(`${edges.length} edge(s), ${externalIds.size} external reference(s).`);
 
     const provenance = {
         packageVersion: require('../../package.json').version,
         generator: ir.generator,
-        sourcePath: (ir.generatorDetail && (ir.generatorDetail.rootDir || ir.generatorDetail.entryFile)) || null,
         dxcVersion: (ir.generatorDetail && ir.generatorDetail.dxcVersion) || null,
     };
     const puml = renderPlantUml(nodes, edges, externalIds, globals, opts, provenance);
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     fs.writeFileSync(outFile, puml, 'utf8');
-    console.error(`Wrote ${outFile}`);
+    log.info(`Wrote ${outFile}`);
 }
 
 module.exports = { run, printHelp };

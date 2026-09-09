@@ -13,7 +13,9 @@
 // `--no-flag` / bare-positional pattern every subcommand already needed,
 // pulled out once instead of five near-identical copies of the same loop.
 //
-// specs: array of { name, flag, negFlag?, type: 'boolean'|'string'|'number', default }.
+// specs: array of { name, flag, negFlag?, altFlags?, type: 'boolean'|'string'|'number', default }.
+// altFlags is an array of additional exact-match spellings for the same
+// flag (e.g. `-v` alongside `--verbose`) - used by VERBOSE_SPEC below.
 // `--help`/`-h`/`-?` is always recognized and reported back as `help`, same
 // as every subcommand already did individually.
 function parseArgs(argv, specs) {
@@ -31,7 +33,7 @@ function parseArgs(argv, specs) {
 
         let matched = false;
         for (const spec of specs) {
-            if (a === spec.flag) {
+            if (a === spec.flag || (spec.altFlags && spec.altFlags.includes(a))) {
                 if (spec.type === 'boolean') values[spec.name] = true;
                 else values[spec.name] = spec.type === 'number' ? parseFloat(argv[++i]) : argv[++i];
                 matched = true;
@@ -55,4 +57,10 @@ function parseArgs(argv, specs) {
     return { values, positionals, help };
 }
 
-module.exports = { parseArgs };
+// Shared --verbose/-v spec every command's own SPECS array includes -
+// print more than the terse default summary: per-file/per-node/per-global
+// detail, and the exact system commands issued (dxc invocations, HTTP
+// requests, PNG/SVG writes). See ./logger.js.
+const VERBOSE_SPEC = { name: 'verbose', flag: '--verbose', altFlags: ['-v'], type: 'boolean', default: false };
+
+module.exports = { parseArgs, VERBOSE_SPEC };
