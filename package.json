@@ -1,6 +1,6 @@
 {
   "name": "hlsl-workgraph-diagram",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "Reverse-engineer a Direct3D 12 Work Graph's topology from HLSL source (regex scan or dxc compile) and render it as a PlantUML diagram (plus PNG/SVG). Five commands: parse-source, parse-dxil, setup-dxil, build-puml, puml-render.",
   "keywords": [
     "directx12",
