@@ -66,7 +66,8 @@ hlsl-workgraph-diagram <command> [args...]
 ```
 
 Run `hlsl-workgraph-diagram --help` for the command list, or `hlsl-workgraph-diagram <command> --help` for
-a command's own arguments/options.
+a command's own arguments/options. Run `hlsl-workgraph-diagram --version` (or `-v`) to print the installed
+package version.
 
 ### The regex-scan path
 

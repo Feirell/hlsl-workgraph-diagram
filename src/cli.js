@@ -44,6 +44,7 @@ const SUMMARIES = {
 
 function printTopHelp() {
     console.log(`Usage: hlsl-workgraph-diagram <command> [args...]
+       hlsl-workgraph-diagram --version
 
 Commands:
 ${COMMAND_ORDER.map((c) => `  ${c.padEnd(14)} ${SUMMARIES[c]}`).join('\n')}
@@ -66,6 +67,10 @@ Or, using the dxc-based parser instead of the regex scanner:
 
 async function main(argv) {
     const [cmd, ...rest] = argv;
+    if (cmd === '--version' || cmd === '-v') {
+        console.log(require('../package.json').version);
+        return;
+    }
     if (!cmd || cmd === '--help' || cmd === '-h' || cmd === '-?') {
         printTopHelp();
         process.exitCode = cmd ? 0 : 1;
