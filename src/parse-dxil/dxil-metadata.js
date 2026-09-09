@@ -189,13 +189,47 @@ function getSourceFiles(resolveId, named) {
 
 // Comment extraction: the contiguous `//` block immediately preceding, no
 // blank line in between. Line-based since that's what debug info gives us
-// (a defining line number), not character-offset addressing. Skips back
-// over the HLSL attribute lines ([Shader("node")] etc.) directly above the
-// function signature first.
+// (a defining line number), not character-offset addressing.
+//
+// Anchored specifically on the [Shader("node")] line, not just "skip back
+// over whatever attribute lines are directly above the function signature" -
+// a real-world shader (a mesh node with a disabled `// [WaveSize(32)]` line
+// sitting *below* [Shader("node")] among its other attributes) showed that
+// the coarser rule misreads a commented-out attribute as the node's own doc
+// comment: the old skip-loop only recognized bare `[...]` lines, so it
+// stopped right at that comment line and read it (and it alone) back as the
+// leading comment - it never even reached [Shader("node")]. Matches
+// parse-source's own anchor point (comments.js's extractPrecedingComment
+// anchors on the [Shader("node")] regex match itself, not the function
+// line), so both parsers agree on what counts as a node's doc comment.
+const SHADER_NODE_ATTR_LINE = /^\s*\[\s*Shader\s*\(\s*"node"\s*\)\s*\]\s*$/;
+
 function extractLeadingComment(fileContent, functionLine) {
     const lines = fileContent.split('\n');
     let i = functionLine - 1 - 1; // 0-based index of the line above the function's own line
-    while (i >= 0 && /^\s*\[.*\]\s*$/.test(lines[i])) i--;
+
+    // Walk up through the contiguous run of attribute/comment lines,
+    // recording where [Shader("node")] itself sits - a comment below it
+    // (interspersed among the other attributes) documents an attribute, not
+    // the node, and must not leak in as the node's own comment.
+    let shaderLine = -1;
+    let j = i;
+    while (j >= 0 && (/^\s*\[.*\]\s*$/.test(lines[j]) || /^\s*\/\//.test(lines[j]))) {
+        if (SHADER_NODE_ATTR_LINE.test(lines[j])) shaderLine = j;
+        j--;
+    }
+
+    if (shaderLine !== -1) {
+        i = shaderLine - 1; // only what's immediately above Shader("node") counts
+    } else {
+        // [Shader("node")] isn't identifiable as its own line (e.g. a
+        // same-line trailing comment broke the walk above before reaching
+        // it) - fall back to the old, coarser "skip the whole attribute
+        // block" rule so this still degrades gracefully instead of
+        // misparsing.
+        while (i >= 0 && /^\s*\[.*\]\s*$/.test(lines[i])) i--;
+    }
+
     const collected = [];
     while (i >= 0 && /^\s*\/\//.test(lines[i])) {
         collected.unshift(lines[i].replace(/^\s*\/\/ ?/, ''));
