@@ -98,14 +98,20 @@ async function run(argv) {
         await renderWithPlantumlServer(puml, outBase, server, log);
         log.info(`Rendered ${outBase}.png and ${outBase}.svg via ${server}`);
     } catch (err) {
-        log.info(
-            `Warning: PlantUML server rendering failed (${err.message}). ` +
-                'The .puml file itself is unaffected - this is a rendering-service limitation, not a syntax ' +
-                'error. For a large/detailed diagram, the public PlantUML server has been observed to fail past ' +
-                'a certain accumulated complexity (see the root README\'s Rendering notes); try re-running ' +
-                '"build-puml" with --short and/or --no-edge-label to reduce it, or point --server at a ' +
-                'self-hosted PlantUML instance.'
-        );
+        if (err.isWriteError) {
+            // The server request succeeded; writing the result to disk failed
+            // locally (e.g. the existing output file is open elsewhere).
+            log.info(`Warning: ${err.message}`);
+        } else {
+            log.info(
+                `Warning: PlantUML server rendering failed (${err.message}). ` +
+                    'The .puml file itself is unaffected - this is a rendering-service limitation, not a syntax ' +
+                    'error. For a large/detailed diagram, the public PlantUML server has been observed to fail past ' +
+                    'a certain accumulated complexity (see the root README\'s Rendering notes); try re-running ' +
+                    '"build-puml" with --short and/or --no-edge-label to reduce it, or point --server at a ' +
+                    'self-hosted PlantUML instance.'
+            );
+        }
         process.exitCode = 1;
     }
 }
