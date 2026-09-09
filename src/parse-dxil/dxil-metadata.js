@@ -233,6 +233,30 @@ const RESOURCE_KIND_NAMES = {
     18: 'FeedbackTexture2DArray',
 };
 
+// dxc's LLVM type printer spells HLSL's builtin vector/matrix aliases out
+// by their underlying template instantiation - "float3" prints as
+// "vector<float, 3>", "float4x4" as "matrix<float, 4, 4>" - there is no
+// alternate "float3" spelling anywhere in the disassembly text to recover
+// instead; confirmed against a real compile of `StructuredBuffer<float3>`
+// (this exact global produced the literal type name
+// `class.StructuredBuffer<vector<float, 3> >`, spaces included). This maps
+// that spelling back to the familiar HLSL one, applied wherever a type
+// name recovered from raw disassembly text might contain it - currently
+// just extractResourceValueType() below. Loops (bounded) since a matrix or
+// vector can appear nested inside a larger template argument.
+function normalizeDxilTypeName(name) {
+    if (!name) return name;
+    let current = name;
+    for (let i = 0; i < 4; i++) {
+        const next = current
+            .replace(/\bmatrix<\s*([\w:]+)\s*,\s*(\d+)\s*,\s*(\d+)\s*>/g, (_, t, r, c) => `${t}${r}x${c}`)
+            .replace(/\bvector<\s*([\w:]+)\s*,\s*(\d+)\s*>/g, (_, t, n) => `${t}${n}`);
+        if (next === current) break;
+        current = next;
+    }
+    return current.trim();
+}
+
 // The friendly element/value type name (e.g. "ItemMeta" out of
 // "StructuredBuffer<ItemMeta>") isn't in the resource metadata tuple
 // itself - recovered instead by finding this specific global's own
@@ -241,14 +265,33 @@ const RESOURCE_KIND_NAMES = {
 // type-naming happens to preserve it verbatim, unlike the mangled name).
 // mangledName must be the exact `@"..."` global reference text (already
 // escaped for regex use).
+//
+// Two shapes seen against real compiles, tried in order:
+//  1. Bitcast-wrapped reference: the global itself is declared as the
+//     opaque %dx.types.Handle, and the friendly class/struct type only
+//     appears in a `bitcast (%dx.types.Handle* @"..." to %"..."*)`
+//     expression at each reference site, including the resource metadata
+//     tuple itself (the original, only case this was written against).
+//  2. Direct declaration: needed when the resource's element type
+//     requires special host-side layout (confirmed trigger: a struct
+//     containing a matrix field) - dxc then declares a *second*,
+//     "_legacy"-suffixed mangled global directly as the friendly type
+//     (prefixed "hostlayout." - e.g. `%"hostlayout.class.StructuredBuffer
+//     <MVPRootConstant>"`), referenced with no bitcast needed anywhere.
+//     The "(?:[\w.]*\.)?" prefix below absorbs "hostlayout." (or any other
+//     future dotted prefix) ahead of "class."/"struct.".
 function extractResourceValueType(disText, mangledName) {
     if (!mangledName) return null;
     const escaped = mangledName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`%"(?:class|struct)\\.([^"]*)"\\*\\s*bitcast\\s*\\(%dx\\.types\\.Handle\\*\\s*@"${escaped}"`);
-    const m = disText.match(re);
+    const typeNamePattern = '%"(?:[\\w.]*\\.)?(?:class|struct)\\.([^"]*)"';
+
+    const bitcastRe = new RegExp(`${typeNamePattern}\\*\\s*bitcast\\s*\\(%dx\\.types\\.Handle\\*\\s*@"${escaped}"`);
+    const declRe = new RegExp(`@"${escaped}"\\s*=\\s*external\\s+\\w+\\s+${typeNamePattern}`);
+    const m = disText.match(bitcastRe) || disText.match(declRe);
     if (!m) return null;
+
     const templateMatch = m[1].match(/<(.+)>$/);
-    return templateMatch ? templateMatch[1] : null;
+    return templateMatch ? normalizeDxilTypeName(templateMatch[1]) : null;
 }
 
 // Decodes the shared "resource base record" prefix - [ID, GlobalVariable,
@@ -328,6 +371,7 @@ module.exports = {
     normalizePath,
     getSourceFiles,
     extractLeadingComment,
+    normalizeDxilTypeName,
     extractResourceValueType,
     getResources,
     extractFunctionBody,

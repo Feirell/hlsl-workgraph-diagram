@@ -96,13 +96,33 @@ blocks stripped, trailing identifier taken as the name. Verified against `exampl
 | `regType`, `regSlot`, `space` | various | from the `: register(tN[, spaceM])` declaration text | from the resource metadata's shared base record (`[ID, GlobalVar, Name, Space, RangeStart, RangeSize, ...]` - documented common prefix across all four classes, confirmed against a real compile) |
 | `kind` | string\|null | the literal HLSL type name (`StructuredBuffer`, `ConstantBuffer`, ...) | for SRV/UAV: the DXIL `ResourceKind` enum name (`RESOURCE_KIND_NAMES` in `dxil-metadata.js` - documented in dxc's `DXIL.h`, confirmed here: a `StructuredBuffer<T>` produced literal `12`); for CBV/Sampler: fixed `'CBuffer'`/`'Sampler'` (not decoded positionally - untested whether those classes even carry a kind field at the same tuple index) |
 | `rw` | boolean | literal `RW` prefix in the source | **derived, not literal**: `resourceClass === 'UAV'` - exactly equivalent for every resource kind this tool models (a buffer is only ever compiled into the UAV class *because* it's read-write) |
-| `valueType` | string\|null | the `<T>` template argument text | the same, recovered by finding this specific global's own LLVM type annotation in the raw disassembly (`extractResourceValueType()`) and pulling the `<...>` out of it - not from the resource metadata tuple, which doesn't carry a friendly type name |
+| `valueType` | string\|null | the `<T>` template argument text | the same, recovered by finding this specific global's own LLVM type annotation in the raw disassembly (`extractResourceValueType()`) and pulling the `<...>` out of it - not from the resource metadata tuple, which doesn't carry a friendly type name. Builtin vector/matrix aliases (`float3`, `float4x4`, ...) are normalized back from dxc's own spelling (`vector<float, 3>`, `matrix<float, 4, 4>`) - see `normalizeDxilTypeName()` and the gotcha below. |
 | `file` | string\|null | declaring file | **always `null`** - would need a debug-info cross-reference (`!DIGlobalVariable`) not yet implemented |
 
 All of `kind`/`rw`/`valueType`/`regType`/`regSlot`/`space` for `parse-dxil` are verified against a real
-`StructuredBuffer<T>` SRV (the fixture's `itemMeta`) - CBuffer, Sampler, UAV (`RW...`), and array
-(`RangeSize > 1`) resources are implemented from the documented/inferred shared schema but not yet
-exercised against a real compile of one, since none of this repo's examples/fixture use them.
+`StructuredBuffer<T>` SRV, for `T` = a plain struct (the fixture's `itemMeta`), a struct containing a
+matrix field, and a bare builtin vector type (`StructuredBuffer<float3>`) - see the two gotchas below.
+CBuffer, Sampler, UAV (`RW...`), and array (`RangeSize > 1`) resources are implemented from the
+documented/inferred shared schema but not yet exercised against a real compile of one, since none of this
+repo's examples/fixture use them.
+
+**Gotcha (already hit once, don't reintroduce):** a resource whose element struct contains a matrix field
+needs special host-side layout handling, and dxc's output differs enough that `extractResourceValueType()`
+originally missed it entirely (`valueType` came back `null`, rendered as `-`). Confirmed against a real
+compile of `StructuredBuffer<T>` where `T` has a `float4x4` field: dxc declares a *second*,
+`_legacy`-suffixed mangled global for it, declared *directly* as the friendly type (no `bitcast` needed
+anywhere) - and that type name itself is prefixed `hostlayout.` (`%"hostlayout.class.StructuredBuffer
+<T>"`), which the original regex (anchored on `class.`/`struct.` at the very start) didn't allow for.
+`extractResourceValueType()` now tries both the original bitcast-wrapped-reference shape and a direct-
+declaration shape, and its type-name pattern tolerates an arbitrary dotted prefix before `class.`/`struct.`.
+
+**Gotcha #2 (already hit once, don't reintroduce):** dxc's LLVM type printer has no HLSL-alias spelling at
+all for a *bare* builtin vector/matrix type used directly as a resource's element type - confirmed
+against a real compile of `StructuredBuffer<float3>`, whose LLVM type name is literally
+`class.StructuredBuffer<vector<float, 3> >` (space before the closing `>` included). There's no "float3"
+string anywhere in the disassembly to fall back to; `normalizeDxilTypeName()` maps the `vector<T, N>`/
+`matrix<T, R, C>` spelling back to HLSL's `TN`/`TRxC` form itself, applied to whatever
+`extractResourceValueType()` recovers.
 
 **Global-set semantics differ, not just field richness**: `parse-source`'s `globals[]` lists *every*
 resource declared anywhere in the scanned tree, whether any node reads it or not (that's how the legend

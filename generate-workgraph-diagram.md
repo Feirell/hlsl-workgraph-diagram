@@ -141,8 +141,28 @@ behind every design choice below - which DXIL metadata tags are documented vs. e
    `resourceToIr()` derives `rw` as `resourceClass === 'UAV'` (not read from a literal "RW" prefix - a
    buffer is only ever compiled into the UAV class *because* it's read-write, so this is exact for every
    resource kind this tool models). Verified end-to-end against the fixture's `itemMeta`
-   (`StructuredBuffer<ItemMeta>` SRV); CBuffer/Sampler/UAV/resource-array cases are implemented from the
-   documented/inferred shared schema but not yet exercised against a real compile of one.
+   (`StructuredBuffer<ItemMeta>` SRV), plus (after two real bugs found and fixed - see the gotchas below) a
+   struct containing a matrix field and a bare `StructuredBuffer<float3>`; CBuffer/Sampler/UAV/
+   resource-array cases are implemented from the documented/inferred shared schema but not yet exercised
+   against a real compile of one.
+
+   **Gotcha (already hit once, don't reintroduce):** a resource element struct containing a matrix field
+   needs host-side layout handling dxc represents differently - confirmed against a real compile: dxc emits
+   a *second*, `_legacy`-suffixed global declared *directly* as the friendly type (no `bitcast` needed
+   anywhere, unlike the plain case `extractResourceValueType()` was originally written against), and that
+   type name is itself prefixed `hostlayout.` (`%"hostlayout.class.StructuredBuffer<T>"`). The function now
+   tries both a bitcast-wrapped-reference match and a direct-declaration match, and its type-name pattern
+   tolerates an arbitrary dotted prefix before `class.`/`struct.` - don't re-anchor that pattern to the
+   exact start of the string.
+
+   **Gotcha #2 (already hit once, don't reintroduce):** dxc's LLVM type printer has no HLSL-alias spelling
+   for a *bare* builtin vector/matrix type used directly as a resource's element type - confirmed against a
+   real compile of `StructuredBuffer<float3>`: its LLVM type name is literally `StructuredBuffer<vector<
+   float, 3> >`, space before the closing `>` included, with no "float3" string anywhere in the
+   disassembly to recover instead. `normalizeDxilTypeName()` maps `vector<T, N>`/`matrix<T, R, C>` back to
+   HLSL's `TN`/`TRxC` spelling itself (bounded-loop regex replace, since one can appear nested inside a
+   larger template argument) - applied to whatever `extractResourceValueType()` recovers, not something
+   dxc's own text ever gives you.
 4. **`original-attrs.js`** - recovers a node's *original*, unevaluated attribute text (e.g. the
    `COLLECT_THREADS` in `[NumThreads(COLLECT_THREADS, 1, 1)]`) from the same `dx.source.contents` debug
    info used for comments: `extractLeadingAttributeBlock()` walks the `[...]` lines directly above a
