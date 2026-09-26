@@ -145,6 +145,7 @@ flags are added faster than docs sometimes keep up.
 | `--dxc-version <mesh\|stable\|experimental\|version>` | auto-detected | Use the `dxc` version `setup-dxil` installed under this name/version. Ignored if `--dxc` is also given. Auto-detection (when neither is passed) is a plain text scan of `entryHLSLFile` for `NodeLaunch("mesh")` - not `#include`-aware, see `docs/ir-format.md`. |
 | `--keep-intermediate` | off | Keep the compiled `.dxil` container and `-Fc` disassembly (`<stem>.dxil`/`<stem>.dis.ll`) in the current working directory instead of a throwaway temp dir - e.g. to inspect them, or to reuse later with `--from-disassembly`. |
 | `--profile <lib_6_N>` | `lib_6_8` | dxc target profile; pass the one your app compiles with. |
+| `--dxc-arg <arg>` | - | Extra dxc argument, verbatim (e.g. `-enable-16bit-types`). Repeatable. |
 | `--from-disassembly <file.dis.ll>` | - | Skip locating/invoking `dxc` entirely and parse an already-compiled disassembly directly - see [Generating the disassembly yourself](#generating-the-disassembly-yourself) below. `entryHLSLFile`/`--define`/`--entry`/`--dxc`/`--dxc-version`/`--keep-intermediate` are all ignored when this is given; the single positional becomes `outJsonFile` instead of `entryHLSLFile`. |
 
 **`build-puml`**:
@@ -192,6 +193,27 @@ edge record types and sizes, reachability per dispatch, statically dead edges, c
 and same-dispatch read-after-write on UAVs, plan rules, and optionally a runtime `[WorkGraph]` inventory. The
 per-node UAV access (`globalAccess`), record sizes and output allocation counts it relies on are read from the
 DXIL, so these features need `parse-dxil`.
+
+## Record struct layouts (`build-records`)
+
+`parse-dxil` also writes the IR's `recordTypes`: every struct that crosses a node edge, is a buffer element
+type, or is nested in one of those, with each field's byte offset, type, array size and source comment.
+`build-records` renders them as a PlantUML class diagram (`--style class`) or YAML diagram (`--style yaml`):
+
+```sh
+hlsl-workgraph-diagram build-records graph.ir.json records.puml --style class --annotations record-annotations.json
+```
+
+Highlighted fields: `SV_DispatchGrid` (taken from the DXIL node metadata, so it is the field the runtime
+really reads - offset, component type and count), implicit padding, and whatever `--annotations` marks
+(`{"Type.field": {"kind": "index"|"control", "target": "<buffer>", "note": "...", "evidence": "file:line"}}`).
+Record flags from the node-IO metadata (RW input, `NodeTrackRWInputSharing`, `globallycoherent`) are shown
+per type. `validate` cross-checks debug-info size against the DXIL record size, the source `: SV_DispatchGrid`
+against the metadata, and that every annotation names a real field and resource.
+
+**What needs `-Zi`:** field names, offsets by name, nested type names and comments come from debug info and
+the embedded source, which `parse-dxil` always requests. Without them only the record size, alignment, the
+SV_DispatchGrid entry and the IO flags survive in the DXIL.
 
 ## Generating the disassembly yourself
 

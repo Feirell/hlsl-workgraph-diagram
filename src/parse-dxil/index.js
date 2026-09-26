@@ -73,6 +73,9 @@ Options:
                         for work graphs). Pass the profile your app
                         compiles with (e.g. lib_6_9) so the IR describes
                         the same DXIL the runtime sees.
+  --dxc-arg <arg>       Extra argument passed to dxc verbatim (e.g.
+                        -enable-16bit-types, -HV 2021). Repeatable; one
+                        token per flag.
   --keep-intermediate   Keep the compiled .dxil container and -Fc
                         disassembly (<stem>.dxil / <stem>.dis.ll) in the
                         current working directory instead of a throwaway
@@ -101,6 +104,7 @@ function run(argv) {
         { name: 'keepIntermediate', flag: '--keep-intermediate', type: 'boolean', default: false },
         { name: 'fromDisassembly', flag: '--from-disassembly', type: 'string', default: null },
         { name: 'profile', flag: '--profile', type: 'string', default: 'lib_6_8' },
+        { name: 'dxcArg', flag: '--dxc-arg', type: 'string', default: null, repeatable: true },
         VERBOSE_SPEC,
     ]);
     if (help) {
@@ -113,9 +117,11 @@ function run(argv) {
     // last value per flag - re-scan argv here for the repeatable ones.
     const defines = [];
     const exportNames = [];
+    const extraArgs = [];
     for (let i = 0; i < argv.length; i++) {
         if (argv[i] === '--define') defines.push(argv[++i]);
         else if (argv[i] === '--entry') exportNames.push(argv[++i]);
+        else if (argv[i] === '--dxc-arg') extraArgs.push(argv[++i]);
     }
 
     // entryHLSLFile is meaningless with --from-disassembly (there's no
@@ -142,6 +148,7 @@ function run(argv) {
             exportNames,
             keepIntermediate: values.keepIntermediate,
             profile: values.profile,
+            extraArgs,
             logger: log,
         }));
         log.verbose(`dxc version: ${dxcVersion || '(unknown)'}`);
@@ -154,6 +161,7 @@ function run(argv) {
         defines,
         exportNames,
         profile: values.fromDisassembly ? null : values.profile,
+        extraArgs: values.fromDisassembly ? [] : extraArgs,
         dxcExe,
         dxcVersion,
     });

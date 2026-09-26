@@ -36,6 +36,8 @@ Options:
   --dispatches <plan.json>   Dispatch plan (see docs/dispatch-plan.md).
   --inventory <file>         Text containing the app's "[WorkGraph]" startup
                              lines (program / node / entrypoint listing).
+  --annotations <file.json>  Record-field annotations (build-records): check
+                             every entry names a real field and buffer.
   --json <file>              Also write the results as JSON.
   --help, -h, -?             Show this help text and exit.
 
@@ -48,6 +50,7 @@ function run(argv) {
         { name: 'dispatches', flag: '--dispatches', type: 'string', default: null },
         { name: 'inventory', flag: '--inventory', type: 'string', default: null },
         { name: 'json', flag: '--json', type: 'string', default: null },
+        { name: 'annotations', flag: '--annotations', type: 'string', default: null },
     ]);
     if (help) {
         printHelp();
@@ -63,6 +66,7 @@ function run(argv) {
     const edges = buildEdges(nodes);
 
     checkEdges(nodes, nodesById, edges, report);
+    if (ir.recordTypes) checkRecordTypes(ir, values.annotations ? JSON.parse(fs.readFileSync(path.resolve(values.annotations), 'utf8')) : null, report);
     checkNodeLimits(nodes, report);
 
     let plan = null;
@@ -106,6 +110,34 @@ function checkEdges(nodes, nodesById, edges, report) {
     for (const n of nodes) {
         if (!n.isEntry && !targeted.has(n.id)) report('FAIL', 'orphan-node', `${n.id}: not an entry and no producer targets it`);
         if (n.launchMode === 'mesh' && n.outputs.length) report('FAIL', 'mesh-leaf', `${n.id}: mesh node declares node outputs`);
+    }
+}
+
+// Record layouts: debug info and node metadata are independent views of the same struct, so they must agree.
+function checkRecordTypes(ir, annotations, report) {
+    for (const [name, t] of Object.entries(ir.recordTypes)) {
+        const d = t.dxil;
+        if (d && d.recordSizeBytes != null) {
+            report(d.recordSizeBytes === t.sizeBytes ? 'PASS' : 'FAIL', 'record-layout-size', `${name}: debug info ${t.sizeBytes} B, DXIL record ${d.recordSizeBytes} B`);
+        }
+        const dg = d && d.dispatchGridField;
+        const src = t.fields.filter((f) => f.sourceSemantic === 'SV_DispatchGrid');
+        if (dg || src.length) {
+            const f = dg && t.fields.find((x) => x.offsetBytes === dg.offsetBytes);
+            const componentBytes = /16$/.test(dg ? dg.componentType : '') ? 2 : 4;
+            const ok = dg && f && src.length === 1 && src[0] === f && f.sizeBytes === dg.count * componentBytes;
+            report(ok ? 'PASS' : 'FAIL', 'sv-dispatchgrid',
+                `${name}: metadata ${dg ? `+${dg.offsetBytes} ${dg.componentType} x${dg.count}` : 'none'}, source ${src.map((x) => x.name).join(', ') || 'none'}`);
+        }
+    }
+    if (!annotations) return;
+    const globals = new Set((ir.globals || []).map((g) => g.name));
+    for (const [key, a] of Object.entries(annotations)) {
+        const [type, field] = key.split('.');
+        const t = ir.recordTypes[type];
+        if (!t || !t.fields.some((f) => f.name === field)) report('FAIL', 'record-annotation', `${key}: no such record field`);
+        else if (a.target && !globals.has(a.target)) report('FAIL', 'record-annotation', `${key}: target ${a.target} is not a resource in the IR`);
+        else report('PASS', 'record-annotation', `${key}: ${a.kind}${a.target ? ` -> ${a.target}` : ''}`);
     }
 }
 

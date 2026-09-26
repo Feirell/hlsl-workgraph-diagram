@@ -26,6 +26,7 @@ const {
     findGlobalAccessForFunction,
 } = require('./dxil-metadata');
 const { accessLabel, findOutputAllocations, findGroupSharedBytes } = require('./resource-access');
+const { decodeIOFlags, decodeDispatchGridField, findStructTypes, collectLayouts } = require('./record-layouts');
 const { extractFunctionBody } = require('./dxil-metadata');
 const { extractOriginalAttrs } = require('./original-attrs');
 const { collectConstants, annotateExpr } = require('./constants');
@@ -133,6 +134,8 @@ function buildIr(dis, resolveId, generatorDetail) {
                 linkedNodeID: rec.linkedNodeID || null,
                 maxRecords: buildScalarField(rec.maxRecords, originalMaxRecords, constantsTable),
                 allocation: isOutput ? allocations[i] || { constCounts: [], dynamicCount: 0 } : undefined,
+                ioFlags: decodeIOFlags(rec.ioFlagsRaw),
+                dispatchGridField: decodeDispatchGridField(rec.recordLayoutRaw),
                 recordSizeBytes: typeof rec.recordSizeBytes === 'number' ? rec.recordSizeBytes : null,
                 recordAlignment: typeof rec.recordAlignment === 'number' ? rec.recordAlignment : null,
                 maxRecordsSharedWith: null, // DXIL tag unverified against a real compile - see docs/ir-format.md
@@ -166,12 +169,64 @@ function buildIr(dis, resolveId, generatorDetail) {
         });
     }
 
+    const globals = (resources || []).map(resourceToIr);
     return {
         generator: 'parse-dxil',
         generatorDetail,
         nodes,
-        globals: (resources || []).map(resourceToIr),
+        globals,
+        recordTypes: buildRecordTypes(nodes, globals, dis, resolveId, sourceFiles),
     };
+}
+
+// Every struct that crosses a node edge or is a UAV/SRV element type, plus the
+// structs nested in them: layout from debug info, and how the graph uses it.
+function buildRecordTypes(nodes, globals, dis, resolveId, sourceFiles) {
+    const structTypes = findStructTypes(dis.rawMap, resolveId);
+    const usage = new Map();
+    const use = (name) => {
+        if (!usage.has(name)) usage.set(name, { producers: [], consumers: [], cpuEntryInput: [], buffers: [], dxil: null });
+        return usage.get(name);
+    };
+    for (const n of nodes) {
+        for (const p of n.inputs) {
+            if (!p.recordType) continue;
+            const u = use(p.recordType);
+            u.consumers.push(n.id);
+            if (n.isEntry) u.cpuEntryInput.push(n.id);
+            u.dxil = u.dxil || dxilRecordFacts(p);
+            if (p.ioFlags) u.dxil.flagsByNode[n.id] = p.ioFlags;
+        }
+        for (const p of n.outputs) {
+            if (!p.recordType) continue;
+            const u = use(p.recordType);
+            u.producers.push(n.id);
+            u.dxil = u.dxil || dxilRecordFacts(p);
+        }
+    }
+    for (const g of globals) {
+        if (g.valueType && structTypes.has(g.valueType)) use(g.valueType).buffers.push(g.name);
+    }
+    const layouts = collectLayouts([...usage.keys()], structTypes, sourceFiles, normalizePath);
+    const out = {};
+    for (const [name, layout] of Object.entries(layouts)) {
+        const u = usage.get(name) || { producers: [], consumers: [], cpuEntryInput: [], buffers: [], dxil: null };
+        const roles = [];
+        if (u.producers.length || u.consumers.length) roles.push('node-record');
+        if (u.cpuEntryInput.length) roles.push('cpu-entry-record');
+        if (u.buffers.length) roles.push('buffer-element');
+        if (!roles.length) roles.push('nested');
+        const dg = u.dxil && u.dxil.dispatchGridField;
+        for (const f of layout.fields) {
+            f.semantic = dg && f.offsetBytes === dg.offsetBytes ? 'SV_DispatchGrid' : f.sourceSemantic;
+        }
+        out[name] = { ...layout, roles, usage: { producers: [...new Set(u.producers)], consumers: [...new Set(u.consumers)], buffers: u.buffers }, dxil: u.dxil };
+    }
+    return out;
+}
+
+function dxilRecordFacts(p) {
+    return { recordSizeBytes: p.recordSizeBytes, alignment: p.recordAlignment, dispatchGridField: p.dispatchGridField, flagsByNode: {} };
 }
 
 // Derives a node's source-subdirectory "group" (matching parse-source's

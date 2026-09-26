@@ -71,6 +71,21 @@ source text instead - the same category of computation `parse-source` uses for e
 scope here (decorating identifiers, not computing the field's own total, which stays compiler-derived either
 way).
 
+## `recordTypes` (parse-dxil only, optional)
+
+`{ [structName]: { sizeBytes, alignBytes, file, line, roles, usage, dxil, fields } }`:
+- `roles`: any of `node-record`, `cpu-entry-record` (input of a `[NodeIsProgramEntry]` node), `buffer-element`
+  (element type of a resource), `nested` (only appears inside another struct).
+- `usage`: `{ producers, consumers, buffers }` - node ids / resource names.
+- `dxil`: `{ recordSizeBytes, alignment, dispatchGridField: {offsetBytes, componentType, count}, flagsByNode }`
+  from NodeRecordType / NodeIOFlags metadata; `null` for types that are not node records.
+- `fields[]`: `{ name, type, arrayDims, structType, offsetBytes, sizeBytes, line, semantic, sourceSemantic, comment }`.
+  `semantic` is `SV_DispatchGrid` when the field's offset matches the metadata entry (authoritative), else the
+  `: SV_*` text found on the field's source line. `comment` is the field's trailing `//` comment or the
+  comment block right above it.
+
+Node params additionally carry `ioFlags` (decoded NodeIOFlags) and `dispatchGridField`.
+
 ## Node
 
 | Field | Type | parse-source | parse-dxil |
