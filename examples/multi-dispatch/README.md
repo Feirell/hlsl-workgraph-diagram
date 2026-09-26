@@ -29,14 +29,14 @@ node generate-workgraph-diagram.js pipeline examples/multi-dispatch/pipeline.con
 
 | File | Shows |
 | --- | --- |
-| [`gen/frame.svg`](gen/frame.svg) | The three dispatches in order. `StoreNode` writes `items` and adds to `counters` (orange); both consumer dispatches read them (blue). Each consumer package lists its entry record (`pass = 0` / `1`) and what `pass` reaches: it is copied into `FanOutRecord.pass` and `ItemRef.pass`. Only `consume-stats` has `ShadeNode`'s atomic write to `counters`, from `WITH_STATS`. |
-| [`gen/02-consume-color.graph.svg`](gen/02-consume-color.graph.svg) | One dispatch's node graph: Globals read only / Record in / Globals written / Record out per node. |
-| [`gen/02-consume-color.records.svg`](gen/02-consume-color.records.svg) | Record layouts: `FanOutRecord.DispatchGrid` as SV_DispatchGrid (sourced from `counters`), `ItemRef.index` indexing `items` and `results`, `FanOutRecord.count` affecting how many `ItemRef`s `FanOutNode` emits (it also decides a branch there; the diagram shows the stronger role). |
+| [`gen/frame.png`](gen/frame.png) | The three dispatches in order. `StoreNode` writes `items` and adds to `counters` (orange); both consumer dispatches read them (blue). Each consumer package lists its entry record (`pass = 0` / `1`) and what `pass` reaches: it is copied into `FanOutRecord.pass` and `ItemRef.pass`. Only `consume-stats` has `ShadeNode`'s atomic write to `counters`, from `WITH_STATS`. |
+| [`gen/02-consume-color.graph.png`](gen/02-consume-color.graph.png) | One dispatch's node graph: Globals read only / Record in / Globals written / Record out per node. |
+| [`gen/02-consume-color.records.png`](gen/02-consume-color.records.png) | Record layouts: `FanOutRecord.DispatchGrid` as SV_DispatchGrid (sourced from `counters`), `ItemRef.index` indexing `items` and `results`, `FanOutRecord.count` affecting how many `ItemRef`s `FanOutNode` emits (it also decides a branch there; the diagram shows the stronger role). |
 | [`gen/validation.txt`](gen/validation.txt) | 55 pass, 0 warn, 0 fail: spec limits, record sizes, SV_DispatchGrid, every consumer-read field written, entry records valid, `items`/`counters` read only after `produce` wrote them. |
 
 ## Record layouts
 
-Each dispatch gets its own records diagram (`gen/NN-<dispatch>.records.svg`), holding the records and buffer
+Each dispatch gets its own records diagram (`gen/NN-<dispatch>.records.png`), holding the records and buffer
 element types that dispatch uses. `consume-color`:
 
 ![Record layouts of the consume-color dispatch](gen/02-consume-color.records.png)
