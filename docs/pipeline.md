@@ -14,7 +14,7 @@ hlsl-workgraph-diagram pipeline workgraph.config.json out/ --jar ~/.local/share/
 {
   "source": "shaders/GraphNodes.hlsl",
   "compile": { "profile": "lib_6_9", "defines": ["SHADER_DIAGNOSTICS=1"], "dxcArgs": [], "dxc": "/opt/dxc/bin/dxc" },
-  "diagram": { "lineType": "ortho", "short": true, "nodeComments": false, "hideGlobals": [] },
+  "diagram": { "lineType": "spline", "frameLineTypes": ["spline", "polyline", "ortho"], "short": true, "nodeComments": false, "hideGlobals": [] },
   "inventory": "startup-log.txt",
   "dispatches": [
     { "name": "generation", "entry": "EntryNode" },
@@ -26,7 +26,8 @@ hlsl-workgraph-diagram pipeline workgraph.config.json out/ --jar ~/.local/share/
 
 Paths are relative to the config file. `compile.defines` apply to every dispatch; a dispatch's own `defines`
 are added to them. The library is compiled once per distinct define set. `compile.dxc` / `compile.dxcVersion`
-select the compiler as for `parse-dxil`. `diagram` holds display options. `inventory` (optional) is a text file with
+select the compiler as for `parse-dxil`. `diagram` holds display options; `frameLineTypes` additionally writes `frame-<style>.puml` per edge-routing
+style (`spline` curves, `polyline` straight segments, `ortho` right angles). `inventory` (optional) is a text file with
 the app's `[WorkGraph]` startup lines, for `validate --inventory`.
 
 **Outputs** (in the order of `dispatches`, which is the frame order):

@@ -121,8 +121,14 @@ function run(argv) {
     const plan = { title: `Dispatch definitions (${path.basename(configFile)}, in order)`, dispatches: planDispatches };
     fs.writeFileSync(path.join(outDir, 'frame.plan.json'), JSON.stringify(plan, null, 2) + '\n');
     const firstFull = fullIrFile.values().next().value;
-    node(['build-puml', firstFull, path.join(outDir, 'frame.puml'), '--dispatches', path.join(outDir, 'frame.plan.json'), ...graphFlags, ...(diagram.hideGlobals || []).flatMap((g) => ['--hide-global', g])]);
+    const frameArgs = [firstFull, '--dispatches', path.join(outDir, 'frame.plan.json'), ...graphFlags, ...(diagram.hideGlobals || []).flatMap((g) => ['--hide-global', g])];
+    node(['build-puml', frameArgs[0], path.join(outDir, 'frame.puml'), ...frameArgs.slice(1)]);
     pumls.push('frame.puml');
+    // Optional extra renderings of the frame, one per edge-routing style (later --line-type wins).
+    for (const lt of diagram.frameLineTypes || []) {
+        node(['build-puml', frameArgs[0], path.join(outDir, `frame-${lt}.puml`), ...frameArgs.slice(1), '--line-type', lt]);
+        pumls.push(`frame-${lt}.puml`);
+    }
 
     // Per compile: graph-wide checks; then the frame: per-dispatch and cross-dispatch checks in declared order.
     let text = '';
