@@ -144,6 +144,7 @@ flags are added faster than docs sometimes keep up.
 | `--dxc <path>` | - | Path to a `dxc.exe` to use directly, instead of one `setup-dxil` installed. |
 | `--dxc-version <mesh\|stable\|experimental\|version>` | auto-detected | Use the `dxc` version `setup-dxil` installed under this name/version. Ignored if `--dxc` is also given. Auto-detection (when neither is passed) is a plain text scan of `entryHLSLFile` for `NodeLaunch("mesh")` - not `#include`-aware, see `docs/ir-format.md`. |
 | `--keep-intermediate` | off | Keep the compiled `.dxil` container and `-Fc` disassembly (`<stem>.dxil`/`<stem>.dis.ll`) in the current working directory instead of a throwaway temp dir - e.g. to inspect them, or to reuse later with `--from-disassembly`. |
+| `--profile <lib_6_N>` | `lib_6_8` | dxc target profile; pass the one your app compiles with. |
 | `--from-disassembly <file.dis.ll>` | - | Skip locating/invoking `dxc` entirely and parse an already-compiled disassembly directly - see [Generating the disassembly yourself](#generating-the-disassembly-yourself) below. `entryHLSLFile`/`--define`/`--entry`/`--dxc`/`--dxc-version`/`--keep-intermediate` are all ignored when this is given; the single positional becomes `outJsonFile` instead of `entryHLSLFile`. |
 
 **`build-puml`**:
@@ -173,6 +174,24 @@ flags are added faster than docs sometimes keep up.
 filesystem or network. `--verbose`/`-v` - print per-file/per-node/per-global/per-edge detail as it's found,
 and the exact system commands issued (`dxc` invocations, HTTP requests, PNG/SVG writes), instead of just
 the terse summary counts.
+
+## Multi-dispatch frames and validation
+
+A work graph dispatched several times per frame (e.g. a generation dispatch followed by raster dispatches that
+read what it wrote through UAVs) can be drawn as one package per dispatch, with the UAV hand-offs between
+them, from a small host-side **dispatch plan** (`docs/dispatch-plan.md`):
+
+```sh
+hlsl-workgraph-diagram parse-dxil shaders/GraphNodes.hlsl graph.ir.json --profile lib_6_9 --define MY_DEFINE=1
+hlsl-workgraph-diagram build-puml graph.ir.json frame.puml --dispatches plan.json --short --no-node-comments
+hlsl-workgraph-diagram validate graph.ir.json --dispatches plan.json --inventory startup-log.txt
+```
+
+`validate` checks the spec's node output limits (which DXC does not check; only `CreateStateObject` does),
+edge record types and sizes, reachability per dispatch, statically dead edges, cross-dispatch read-before-write
+and same-dispatch read-after-write on UAVs, plan rules, and optionally a runtime `[WorkGraph]` inventory. The
+per-node UAV access (`globalAccess`), record sizes and output allocation counts it relies on are read from the
+DXIL, so these features need `parse-dxil`.
 
 ## Generating the disassembly yourself
 

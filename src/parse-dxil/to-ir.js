@@ -23,7 +23,10 @@ const {
     extractLeadingComment,
     getResources,
     findGlobalsUsed,
+    findGlobalAccessForFunction,
 } = require('./dxil-metadata');
+const { accessLabel, findOutputAllocations, findGroupSharedBytes } = require('./resource-access');
+const { extractFunctionBody } = require('./dxil-metadata');
 const { extractOriginalAttrs } = require('./original-attrs');
 const { collectConstants, annotateExpr } = require('./constants');
 
@@ -114,7 +117,8 @@ function buildIr(dis, resolveId, generatorDetail) {
         const graphId = nodeID && nodeID.name ? nodeID.name : funcName;
 
         const numInputs = (props.inputs || []).length;
-        const toParam = (rec, i, offset) => {
+        const allocations = findOutputAllocations(extractFunctionBody(dis.text, funcName));
+        const toParam = (rec, i, offset, isOutput) => {
             const debugParam = debugInfo && debugInfo.params[offset + i];
             const originalMaxRecords = originalAttrs ? originalAttrs.ioMaxRecords[offset + i] : null;
             const varName = originalAttrs ? originalAttrs.ioVarNames[offset + i] : null;
@@ -128,6 +132,9 @@ function buildIr(dis, resolveId, generatorDetail) {
                 varName: varName || null,
                 linkedNodeID: rec.linkedNodeID || null,
                 maxRecords: buildScalarField(rec.maxRecords, originalMaxRecords, constantsTable),
+                allocation: isOutput ? allocations[i] || { constCounts: [], dynamicCount: 0 } : undefined,
+                recordSizeBytes: typeof rec.recordSizeBytes === 'number' ? rec.recordSizeBytes : null,
+                recordAlignment: typeof rec.recordAlignment === 'number' ? rec.recordAlignment : null,
                 maxRecordsSharedWith: null, // DXIL tag unverified against a real compile - see docs/ir-format.md
                 recordFields: debugParam ? debugParam.recordFields : null,
             };
@@ -149,9 +156,13 @@ function buildIr(dis, resolveId, generatorDetail) {
             maxRecursionDepth: buildScalarField(props.maxRecursionDepth, nl.maxRecursionDepth, constantsTable),
             outputTopology: null, // not currently parsed from this metadata - see docs/ir-format.md
             inputs: (props.inputs || []).map((rec, i) => toParam(rec, i, 0)),
-            outputs: (props.outputs || []).map((rec, i) => toParam(rec, i, numInputs)),
+            outputs: (props.outputs || []).map((rec, i) => toParam(rec, i, numInputs, true)),
             meshOutputs: [], // mesh out indices/vertices/primitives excluded, matching parse-source's own documented behavior
             globalsUsed: findGlobalsUsed(dis.text, funcName, resources),
+            groupSharedBytes: findGroupSharedBytes(dis.text, extractFunctionBody(dis.text, funcName)),
+            globalAccess: Object.fromEntries(
+                Object.entries(findGlobalAccessForFunction(dis.text, funcName, resources)).map(([k, v]) => [k, accessLabel(v)])
+            ),
         });
     }
 

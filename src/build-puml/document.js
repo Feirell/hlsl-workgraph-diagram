@@ -45,17 +45,10 @@ function renderNodeBlock(n, indentLevel, theme, globalsByName, opts) {
     return [`${pad}rectangle "${label}" as ${n.id} ${stereotypes.join(' ')}`];
 }
 
-function renderPlantUml(nodes, edges, externalIds, globals, opts, provenance = {}) {
-    const theme = opts.dark ? THEMES.dark : THEMES.light;
-    const globalsByName = new Map(globals.map((g) => [g.name, g]));
+// Shared skinparam block (also used by dispatches.js, so both views stay
+// visually identical).
+function renderPreamble(theme, opts) {
     const lines = [];
-    lines.push('@startuml WorkGraphDependencies');
-    // No "scale" directive here any more - puml-render inserts one on the
-    // fly at render time instead (see its --scale option), so the same
-    // .puml this writes can be re-rendered at a different scale without
-    // regenerating it. See puml-render/index.js's withScale() for the
-    // still-accurate reasoning on why it's the plain multiplier form
-    // ("scale 2"), never the "scale N%" percentage syntax.
     lines.push('hide empty description');
     if (theme.canvasBg) lines.push(`skinparam BackgroundColor ${theme.canvasBg}`);
     lines.push(`skinparam DefaultFontColor ${theme.fontColor}`);
@@ -97,6 +90,21 @@ function renderPlantUml(nodes, edges, externalIds, globals, opts, provenance = {
         lines.push(`    BorderColor ${theme.globalBorder}`);
         lines.push('}');
     }
+    return lines;
+}
+
+function renderPlantUml(nodes, edges, externalIds, globals, opts, provenance = {}) {
+    const theme = opts.dark ? THEMES.dark : THEMES.light;
+    const globalsByName = new Map(globals.map((g) => [g.name, g]));
+    const lines = [];
+    lines.push('@startuml WorkGraphDependencies');
+    // No "scale" directive here any more - puml-render inserts one on the
+    // fly at render time instead (see its --scale option), so the same
+    // .puml this writes can be re-rendered at a different scale without
+    // regenerating it. See puml-render/index.js's withScale() for the
+    // still-accurate reasoning on why it's the plain multiplier form
+    // ("scale 2"), never the "scale N%" percentage syntax.
+    lines.push(...renderPreamble(theme, opts));
     lines.push('');
 
     // Group scanned nodes by their source subdirectory (nodes-compute / nodes-mesh).
@@ -202,14 +210,15 @@ function renderPlantUml(nodes, edges, externalIds, globals, opts, provenance = {
     // renders as "?" rather than "undefined".
     if (globals.length > 0) {
         const allGlobalsSorted = [...globals].sort(
-            (a, b) => (a.regType || '').localeCompare(b.regType || '') || (a.regSlot || 0) - (b.regSlot || 0)
+            (a, b) => (a.space || 0) - (b.space || 0) || (a.regType || '').localeCompare(b.regType || '') || (a.regSlot || 0) - (b.regSlot || 0)
         );
         lines.push('  Global resources:');
         lines.push(`  |${pad('Identifier')}|${pad('Slot')}|${pad('Kind')}|${pad('Value type')}|${pad('Used?')}|`);
         for (const g of allGlobalsSorted) {
             const used = globalUsedByGroups.get(g.name)?.size ? '✓' : '✗';
             const kind = g.kind ? `${g.rw ? 'RW' : ''}${g.kind}` : g.resourceClass || '?';
-            const slot = g.regType != null && g.regSlot != null ? `${g.regType}${g.regSlot}` : '?';
+            // Space included when non-zero: with several register spaces, t0/u1 alone are ambiguous.
+            const slot = g.regType != null && g.regSlot != null ? `${g.regType}${g.regSlot}${g.space ? `, space${g.space}` : ''}` : '?';
             const identCell = `<b><color:${theme.globalHighlight}>${pumlEscape(g.name)}</color></b>`;
             lines.push(`  |${pad(identCell)}|${pad(slot)}|${pad(pumlEscape(kind))}|${pad(pumlEscape(g.valueType || '-'))}|${pad(used)}|`);
         }
@@ -270,4 +279,4 @@ function provenanceLines(theme, { packageVersion, generator, dxcVersion }) {
     return lines;
 }
 
-module.exports = { renderNodeBlock, renderPlantUml };
+module.exports = { renderNodeBlock, renderPlantUml, renderPreamble, provenanceLines, recordTypeSpanFor };

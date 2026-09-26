@@ -18,6 +18,7 @@
 //   parse-dxil    HLSL source (dxc compile) -> IR JSON
 //   build-puml    IR JSON -> .puml
 //   puml-render   .puml -> .png + .svg
+//   validate      spec node limits + dispatch-plan checks over an IR
 //
 // This is a breaking change from v1's single all-in-one CLI invocation
 // (`hlsl-workgraph-diagram rootDir outFile [options]`) - see the root
@@ -30,9 +31,10 @@ const COMMANDS = {
     'parse-dxil': () => require('./parse-dxil'),
     'build-puml': () => require('./build-puml'),
     'puml-render': () => require('./puml-render'),
+    validate: () => require('./validate'),
 };
 
-const COMMAND_ORDER = ['setup-dxil', 'parse-source', 'parse-dxil', 'build-puml', 'puml-render'];
+const COMMAND_ORDER = ['setup-dxil', 'parse-source', 'parse-dxil', 'build-puml', 'puml-render', 'validate'];
 
 const SUMMARIES = {
     'setup-dxil': 'Download and cache a dxc build for parse-dxil to use.',
@@ -40,6 +42,7 @@ const SUMMARIES = {
     'parse-dxil': 'Compile HLSL with dxc and read the shared IR JSON back out of the DXIL metadata.',
     'build-puml': 'Render the IR JSON as a PlantUML (.puml) diagram.',
     'puml-render': 'Render a .puml file to .png/.svg via a PlantUML server.',
+    validate: 'Check an IR against the spec node limits, and a dispatch plan for reachability and UAV hazards.',
 };
 
 function printTopHelp() {

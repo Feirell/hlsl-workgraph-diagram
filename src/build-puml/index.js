@@ -27,6 +27,8 @@ const { readIrFile } = require('../common/ir');
 const { computeDepths } = require('./graph');
 const { renderPlantUml } = require('./document');
 const { SPECS, resolveOpts } = require('./options');
+const { loadPlan, analysePlan } = require('../common/dispatch-plan');
+const { renderDispatchPlantUml } = require('./dispatches');
 
 function printHelp() {
     console.log(`Usage: hlsl-workgraph-diagram build-puml [inJsonFile] [outPUml] [options]
@@ -76,6 +78,17 @@ Options:
                                    parse-source's IR - see docs/ir-format.md.
   --record-out-names / --no-record-out-names
                                    Same, for "Record out:". Default: off.
+  --node-comments / --no-node-comments
+                                   Show each node's leading source comment
+                                   in its box. Default: on.
+  --dispatches <plan.json>         Render the multi-dispatch view instead:
+                                   one package per DispatchGraph call in
+                                   the plan (see docs/dispatch-plan.md),
+                                   each holding the subgraph reachable from
+                                   its entry, plus UAV boxes with the
+                                   write/atomic/read edges between them.
+                                   Uses the IR's optional globalAccess and
+                                   output allocation fields when present.
   --verbose, -v                    Print each node/edge/global found, and
                                     its computed depth, instead of just the
                                     summary counts.
@@ -142,7 +155,17 @@ function run(argv) {
         generator: ir.generator,
         dxcVersion: (ir.generatorDetail && ir.generatorDetail.dxcVersion) || null,
     };
-    const puml = renderPlantUml(nodes, edges, externalIds, globals, opts, provenance);
+    let puml;
+    if (opts.dispatches) {
+        const plan = loadPlan(path.resolve(opts.dispatches));
+        const analysis = analysePlan(plan, nodes);
+        for (const d of analysis.dispatches) {
+            log.info(`dispatch ${d.id} (${d.entry}): ${d.analysis.nodeIds.length} node(s), ${d.analysis.deadIds.size} never launched.`);
+        }
+        puml = renderDispatchPlantUml(ir, plan, analysis, opts, provenance);
+    } else {
+        puml = renderPlantUml(nodes, edges, externalIds, globals, opts, provenance);
+    }
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     fs.writeFileSync(outFile, puml, 'utf8');
     log.info(`Wrote ${outFile}`);

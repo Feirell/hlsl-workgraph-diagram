@@ -89,6 +89,8 @@ way).
 | `outputTopology` | string\|null | `OutputTopology(...)` text | **always `null`** - not present in the metadata tags parsed today |
 | `inputs[]` / `outputs[]` | Param[] | see below | see below |
 | `meshOutputs[]` | `{kind, type, varName}[]` | mesh `out indices/vertices/primitives` params | **always `[]`** - excluded entirely, matching parse-source's own documented behavior (not a gap, a deliberate parity choice) |
+| `globalAccess` | `{name: string}`, optional | absent | per resource, how the compiled function body uses it: `read`, `write`, `atomic`, `query` (`GetDimensions` only), joined with `+` (e.g. `read+write`). Traced through the DXIL handle SSA chain (`load @global` -> `createHandleForLib` -> `annotateHandle` -> the `dx.op` using it); a phi/select of two handles is attributed to both. See `../src/parse-dxil/resource-access.js`. |
+| `groupSharedBytes` | number, optional | absent | bytes of `groupshared` (addrspace(3)) globals the function references - the spec's `SharedMemorySize` |
 | `globalsUsed` | string[] | names, from a whole-body text scan | names, from the compiled DXIL function body's `createHandleForLib` calls (post-dead-code-elimination - see "Globals" below) |
 
 ### Param (an entry of `inputs[]`/`outputs[]`)
@@ -101,6 +103,8 @@ way).
 | `linkedNodeID` | `{name, index}`\|null | outputs only - the `[NodeID(...)]` target (or var name) | same |
 | `maxRecords` | scalar\|null | ✓ | ✓ |
 | `maxRecordsSharedWith` | scalar\|null | outputs only, from `[MaxRecordsSharedWith(...)]` text | **always `null`** - the DXIL tag for this was never verified against a real compile (see `experimental/README.md`'s history) |
+| `recordSizeBytes` / `recordAlignment` | number\|null, optional | absent | from the DXIL NodeRecordType metadata (tag 2: `[0: size, 1: SV_DispatchGrid, 2: alignment]`) - the real padded size, unlike summing `recordFields` |
+| `allocation` | `{constCounts: number[], dynamicCount: number}`, outputs only, optional | absent | every `allocateNodeOutputRecords` call on this output: literal counts, and how many are computed at runtime. All-literal-zero means the edge never carries a record |
 | `recordFields` | `{name, sizeBits}[]`\|null | **always `null`** - v1 never resolves struct definitions | the record struct's field list, from debug info - richer here than parse-source, not currently rendered by build-puml |
 
 `varName` for `parse-dxil` isn't from debug info - this dxc build's debug info has zero `DW_TAG_arg_variable`

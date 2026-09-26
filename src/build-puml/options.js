@@ -28,6 +28,8 @@ const SPECS = [
     { name: 'globalListEnabled', flag: '--global-list', negFlag: '--no-global-list', type: 'boolean', default: true },
     { name: 'recordInNamesEnabled', flag: '--record-in-names', negFlag: '--no-record-in-names', type: 'boolean', default: false },
     { name: 'recordOutNamesEnabled', flag: '--record-out-names', negFlag: '--no-record-out-names', type: 'boolean', default: false },
+    { name: 'nodeComments', flag: '--node-comments', negFlag: '--no-node-comments', type: 'boolean', default: true },
+    { name: 'dispatches', flag: '--dispatches', type: 'string', default: null },
     VERBOSE_SPEC,
 ];
 
@@ -49,6 +51,8 @@ function resolveOpts(values) {
         globalListEnabled: values.globalListEnabled,
         recordInNamesEnabled: values.recordInNamesEnabled,
         recordOutNamesEnabled: values.recordOutNamesEnabled,
+        nodeComments: values.nodeComments,
+        dispatches: values.dispatches,
     };
 }
 

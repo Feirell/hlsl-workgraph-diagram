@@ -7,6 +7,8 @@
 // ---------------------------------------------------------------------------
 'use strict';
 
+const { findGlobalAccess } = require('./resource-access');
+
 // ---------------------------------------------------------------------------
 // Tag scheme (documented: DirectX-Specs WorkGraphs.html "DXIL Shader
 // function attributes", cross-checked against DxilMetadataHelper.h and
@@ -70,7 +72,16 @@ function decodeIORecord(list) {
         const tag = list[i];
         const val = list[i + 1];
         if (tag === 1) rec.ioFlagsRaw = val; // not decoded further - record kind/type name comes from debug info instead
-        else if (tag === 2) rec.recordLayoutRaw = val; // best-effort byte layout, prefer debug-info field list for display
+        else if (tag === 2) {
+            // NodeRecordType: [0: size in bytes, 1: SV_DispatchGrid (offset, component type, count), 2: alignment].
+            rec.recordLayoutRaw = val;
+            if (Array.isArray(val)) {
+                for (let k = 0; k + 1 < val.length; k += 2) {
+                    if (val[k] === 0 && typeof val[k + 1] === 'number') rec.recordSizeBytes = val[k + 1];
+                    else if (val[k] === 2 && typeof val[k + 1] === 'number') rec.recordAlignment = val[k + 1];
+                }
+            }
+        }
         else if (tag === 3) rec.maxRecords = val;
         else if (tag === 0 && Array.isArray(val)) rec.linkedNodeID = { name: val[0], index: val[1] };
         else (rec.unknownTags = rec.unknownTags || []).push([tag, val]);
@@ -321,7 +332,9 @@ function normalizeDxilTypeName(name) {
         if (next === current) break;
         current = next;
     }
-    return current.trim();
+    current = current.trim();
+    // A bare scalar element type has no vector<>/matrix<> wrapper to hang the mapping on.
+    return /^[a-z][a-z0-9 ]*$/.test(current) ? hlslScalarName(current) : current;
 }
 
 // The friendly element/value type name (e.g. "ItemMeta" out of
@@ -413,6 +426,10 @@ function extractFunctionBody(disText, funcName) {
 // Best-effort text scan of a node's own DXIL function body for
 // createHandleForLib calls, matched back to a resource by the referenced
 // global's mangled name.
+function findGlobalAccessForFunction(disText, funcName, resources) {
+    return findGlobalAccess(extractFunctionBody(disText, funcName), resources);
+}
+
 function findGlobalsUsed(disText, funcName, resources) {
     if (!resources || resources.length === 0) return [];
     const body = extractFunctionBody(disText, funcName);
@@ -445,4 +462,5 @@ module.exports = {
     getResources,
     extractFunctionBody,
     findGlobalsUsed,
+    findGlobalAccessForFunction,
 };

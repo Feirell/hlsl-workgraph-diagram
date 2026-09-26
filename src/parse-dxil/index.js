@@ -69,6 +69,10 @@ Options:
                         Use the dxc version "setup-dxil" installed under
                         this name/version (see "hlsl-workgraph-diagram
                         setup-dxil list"). Ignored if --dxc is also given.
+  --profile <lib_6_N>   dxc target profile. Default: lib_6_8 (the minimum
+                        for work graphs). Pass the profile your app
+                        compiles with (e.g. lib_6_9) so the IR describes
+                        the same DXIL the runtime sees.
   --keep-intermediate   Keep the compiled .dxil container and -Fc
                         disassembly (<stem>.dxil / <stem>.dis.ll) in the
                         current working directory instead of a throwaway
@@ -96,6 +100,7 @@ function run(argv) {
         { name: 'dxcVersion', flag: '--dxc-version', type: 'string', default: null },
         { name: 'keepIntermediate', flag: '--keep-intermediate', type: 'boolean', default: false },
         { name: 'fromDisassembly', flag: '--from-disassembly', type: 'string', default: null },
+        { name: 'profile', flag: '--profile', type: 'string', default: 'lib_6_8' },
         VERBOSE_SPEC,
     ]);
     if (help) {
@@ -136,6 +141,7 @@ function run(argv) {
             defines,
             exportNames,
             keepIntermediate: values.keepIntermediate,
+            profile: values.profile,
             logger: log,
         }));
         log.verbose(`dxc version: ${dxcVersion || '(unknown)'}`);
@@ -147,6 +153,7 @@ function run(argv) {
         fromDisassembly: values.fromDisassembly ? path.resolve(values.fromDisassembly) : null,
         defines,
         exportNames,
+        profile: values.fromDisassembly ? null : values.profile,
         dxcExe,
         dxcVersion,
     });

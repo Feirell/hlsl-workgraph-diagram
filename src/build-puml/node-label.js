@@ -181,7 +181,7 @@ function buildGlobalsUsedLines(n, globalsByName, theme, globalListEnabled) {
     const valueLines = n.globalsUsed.map((name) => {
         const g = globalsByName.get(name) || { name };
         const identSpan = `<color:${theme.globalHighlight}>${pumlEscape(g.name)}</color>`;
-        const regText = g.regType != null && g.regSlot != null ? `${g.regType}${g.regSlot}` : '?';
+        const regText = g.regType != null && g.regSlot != null ? `${g.regType}${g.regSlot}${g.space ? `, space${g.space}` : ''}` : '?';
         const typeSpan = g.valueType ? ` <color:${theme.greyOne}><<${pumlEscape(g.valueType)}>></color>` : '';
         return smallItalicLine(`  ${identSpan} (${regText})${typeSpan}`);
     });
@@ -261,7 +261,7 @@ function buildLabel(n, grid, theme, globalsByName, opts) {
         label += `\\n\\n${recordBlock}`;
     }
 
-    if (n.comment) {
+    if (n.comment && opts.nodeComments !== false) {
         const commentText = n.comment
             .split('\n')
             .map((l) => `<size:9>${pumlEscape(l)}</size>`)

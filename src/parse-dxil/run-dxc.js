@@ -127,7 +127,7 @@ function getDxcVersionString(dxcExe) {
 // `logger`: see ../common/logger.js - `logger.verbose()` gets the exact
 // dxc command line; without --verbose, only the summary lines in index.js
 // print.
-function compileToDisassembly(entryFile, { dxcPath, dxcVersion, defines = [], exportNames = [], keepIntermediate = false, logger } = {}) {
+function compileToDisassembly(entryFile, { dxcPath, dxcVersion, defines = [], exportNames = [], keepIntermediate = false, profile = 'lib_6_8', logger } = {}) {
     const log = logger || require('../common/logger').createLogger(false);
     const dxcExe = locateDxc({ dxcPath, dxcVersion }, entryFile);
     log.verbose(`Using dxc: ${dxcExe}`);
@@ -140,7 +140,7 @@ function compileToDisassembly(entryFile, { dxcPath, dxcVersion, defines = [], ex
     const dxilOut = path.join(workDir, `${stem}.dxil`);
     const disOut = path.join(workDir, `${stem}.dis.ll`);
 
-    const args = ['-T', 'lib_6_8'];
+    const args = ['-T', profile];
     for (const name of exportNames) args.push('-exports', name);
     for (const d of defines) args.push('-D', d);
     args.push('-Zi', '-Qembed_debug');
