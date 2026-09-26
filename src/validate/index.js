@@ -175,6 +175,7 @@ function checkPlan(plan, ir, report) {
         report('WARN', 'uav-hazards', 'IR has no globalAccess (parse-source, or an older parse-dxil): cross-dispatch data flow not checked');
     } else {
         checkUavFlow(plan, dispatches, globalsByName, report);
+        checkAttachmentFlows(plan, dispatches, report);
         checkRules(plan, dispatches, nodesById, globalsByName, report);
     }
 }
@@ -198,11 +199,61 @@ function checkUavFlow(plan, dispatches, globalsByName, report) {
                 if (a.writers.length && readersOnly.length) {
                     report('WARN', 'same-dispatch-raw', `${res} in ${d.id}: read by ${readersOnly.join(', ')} and written by ${a.writers.join(', ')} in the same dispatch (needs globallycoherent + device-scope barrier)`);
                 }
+                const atomicOnly = a.atomics.filter((w) => !readersOnly.includes(w));
+                if (readersOnly.length && atomicOnly.length) {
+                    // Only safe if the read and the atomics touch disjoint elements - not provable from access kinds.
+                    report('INFO', 'same-dispatch-atomic', `${res} in ${d.id}: plain read by ${readersOnly.join(', ')} while ${[...new Set(atomicOnly)].join(', ')} update it atomically - check the elements are disjoint`);
+                }
+                conditionalOnly(res, d, dispatches, producedBefore, initialised, report);
                 const src = producedBefore.length ? producedBefore.join('; ') : initialised.has(res) ? 'frame-start initialisation' : null;
                 if (src) report('PASS', 'cross-dispatch-flow', `${res}: read in ${d.id} by ${[...new Set(a.readers)].join(', ')} <- produced by ${src}`);
                 else if (!producers.length) report('WARN', 'read-before-write', `${res}: read in ${d.id} by ${a.readers.join(', ')}, but no earlier dispatch writes it`);
             }
             if (producers.length) producedBefore.push(`${d.id}:${[...new Set(producers)].join(',')}`);
+        }
+    }
+}
+
+// A reader whose every earlier producer sits in a CONDITIONAL dispatch reads whatever the resource holds
+// when those dispatches are skipped: fine if it is initialised at frame start, a hazard otherwise.
+function conditionalOnly(res, d, dispatches, producedBefore, initialised, report) {
+    if (!producedBefore.length) return;
+    const producerIds = producedBefore.map((p) => p.split(':')[0]);
+    const allConditional = producerIds.every((id) => dispatches.find((x) => x.id === id)?.conditional);
+    if (!allConditional) return;
+    if (initialised.has(res)) {
+        report('INFO', 'conditional-producer', `${res}: read in ${d.id}, produced only by conditional ${producerIds.join(', ')}; falls back to its frame-start initialisation when skipped`);
+    } else {
+        report('WARN', 'conditional-producer', `${res}: read in ${d.id}, produced only by conditional ${producerIds.join(', ')} and not initialised at frame start - stale when skipped`);
+    }
+}
+
+function checkAttachmentFlows(plan, dispatches, report) {
+    const initialised = new Set((plan.frameStart && plan.frameStart.initialisedResources) || []);
+    const order = dispatches.map((d) => d.id);
+    for (const f of plan.attachmentFlows || []) {
+        const producedBefore = [];
+        for (const d of dispatches) {
+            const consumer = (f.consumers || []).find((c) => c.dispatch === d.id);
+            if (consumer) {
+                const dead = (consumer.nodes || []).filter((id) => !d.analysis.liveIds.has(id));
+                if (dead.length) report('FAIL', 'attachment-flow', `${f.resource}: consumer node(s) ${dead.join(', ')} not live in ${d.id}`);
+                if (producedBefore.length) {
+                    report('PASS', 'attachment-flow', `${f.resource}: sampled in ${d.id} by ${consumer.nodes.join(', ')} <- produced by ${producedBefore.join('; ')}`);
+                    conditionalOnly(f.resource, d, dispatches, producedBefore, initialised, report);
+                } else if (!initialised.has(f.resource)) {
+                    report('WARN', 'attachment-flow', `${f.resource}: consumed in ${d.id} before any producer`);
+                }
+            }
+            const producer = (f.producers || []).find((p) => p.dispatch === d.id);
+            if (producer) {
+                const live = (producer.nodes || []).filter((id) => d.analysis.liveIds.has(id));
+                if (!live.length) report('FAIL', 'attachment-flow', `${f.resource}: no live producer node in ${d.id}`);
+                else producedBefore.push(`${d.id}:${live.join(',')}`);
+            }
+        }
+        for (const x of [...(f.producers || []), ...(f.consumers || [])]) {
+            if (!order.includes(x.dispatch)) report('FAIL', 'attachment-flow', `${f.resource}: dispatch ${x.dispatch} not in the plan`);
         }
     }
 }

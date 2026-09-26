@@ -26,7 +26,7 @@ const resourceAlias = (name) => `res_${sanitizeAlias(name)}`;
 
 // Colours for the three access kinds on resource edges - fixed rather than
 // themed: they must stay distinguishable from the record edges in both themes.
-const ACCESS_COLOURS = { write: '#C0392B', atomic: '#D68910', read: '#2471A3' };
+const ACCESS_COLOURS = { write: '#C0392B', atomic: '#D68910', read: '#2471A3', attachment: '#7D3C98' };
 
 function renderDispatchPlantUml(ir, plan, planAnalysis, opts, provenance = {}) {
     const theme = opts.dark ? THEMES.dark : THEMES.light;
@@ -63,6 +63,7 @@ function renderDispatchPlantUml(ir, plan, planAnalysis, opts, provenance = {}) {
             `<size:10>entry ${pumlEscape(d.entry)} · program ${pumlEscape(d.program || '?')}${d.bindings ? ` · ${pumlEscape(d.bindings)}` : ''}</size>`,
             d.entryRecord ? `<size:10>entry record: ${pumlEscape(d.entryRecord)}</size>` : null,
             d.conditional ? `<size:10><i>${pumlEscape(d.conditional)}</i></size>` : null,
+            d.note ? `<size:10>${pumlEscape(d.note)}</size>` : null,
         ]
             .filter(Boolean)
             .join('\\n');
@@ -95,6 +96,19 @@ function renderDispatchPlantUml(ir, plan, planAnalysis, opts, provenance = {}) {
     }
 
     for (const g of boxed) lines.push(`database "${globalBoxLabel(g, theme)}" as ${resourceAlias(g.name)}`);
+    // Plan-declared flows the DXIL of the node library cannot show (render targets written by the rasteriser,
+    // sampled by pixel shaders compiled separately) - drawn as their own boxes in a distinct colour.
+    const attachmentFlows = plan.attachmentFlows || [];
+    for (const f of attachmentFlows) {
+        const label = [
+            `<b><color:${ACCESS_COLOURS.attachment}>${pumlEscape(f.resource)}</color></b>`,
+            f.kind ? `<i><size:9>${pumlEscape(f.kind)}</size></i>` : null,
+            f.transition ? `<size:8>${pumlEscape(f.transition)}</size>` : null,
+        ]
+            .filter(Boolean)
+            .join('\\n');
+        lines.push(`storage "${label}" as ${resourceAlias(`att_${f.resource}`)}`);
+    }
     lines.push('');
 
     // Record edges, per dispatch.
@@ -126,6 +140,22 @@ function renderDispatchPlantUml(ir, plan, planAnalysis, opts, provenance = {}) {
         }
     }
 
+    for (const f of attachmentFlows) {
+        const alias = resourceAlias(`att_${f.resource}`);
+        const colour = ACCESS_COLOURS.attachment;
+        const live = (dId, id) => dispatches.some((d) => d.id === dId && d.analysis.liveIds.has(id));
+        for (const p of f.producers || []) {
+            for (const id of (p.nodes || []).filter((id) => live(p.dispatch, id))) {
+                lines.push(`${nodeAlias(p.dispatch, id)} -[${colour},bold]-> ${alias} : ${pumlEscape(p.how || 'writes')}`);
+            }
+        }
+        for (const c of f.consumers || []) {
+            for (const id of (c.nodes || []).filter((id) => live(c.dispatch, id))) {
+                lines.push(`${alias} -[${colour},bold]-> ${nodeAlias(c.dispatch, id)} : ${pumlEscape(c.how || 'reads')}`);
+            }
+        }
+    }
+
     const pad = (s) => `  ${s}  `;
     lines.push('');
     lines.push('legend right');
@@ -142,6 +172,9 @@ function renderDispatchPlantUml(ir, plan, planAnalysis, opts, provenance = {}) {
     lines.push('  ');
     lines.push(`  <color:${ACCESS_COLOURS.write}>dashed red</color> = node writes the UAV · <color:${ACCESS_COLOURS.atomic}>dashed orange</color> = atomic (allocator/counter)`);
     lines.push(`  <color:${ACCESS_COLOURS.read}>dashed blue</color> = node reads the UAV · dotted grey = declared but never launched (0 records allocated)`);
+    if (attachmentFlows.length) {
+        lines.push(`  <color:${ACCESS_COLOURS.attachment}>bold purple</color> = plan-declared attachment flow (render target / sampled texture), not visible in the node DXIL`);
+    }
     lines.push('  Solid arrows = work-graph records inside one dispatch; resource access is read from the compiled DXIL');
     if (plan.diagram && plan.diagram.hideResourcesNote) lines.push(`  Hidden: ${pumlEscape(plan.diagram.hideResourcesNote)}`);
     const renamed = Object.entries(plan.programs || {}).filter(([, p]) => p.renamedCopies && p.renamedCopies.length);

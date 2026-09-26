@@ -45,6 +45,13 @@ Only `dispatches[].id` and `dispatches[].entry` are required; everything else is
   inventory line.
 - **`frameStart.initialisedResources`**: UAVs that are valid before the first dispatch (cleared, uploaded).
   Reading them is not reported as read-before-write.
+- **`attachmentFlows`**: data that moves between dispatches outside the node library, e.g. a shadow map that is
+  one dispatch's depth target and a later dispatch's pixel-shader input. The node DXIL cannot show this: pixel
+  shaders are a separate compile, and a render target is not a UAV. Each flow has `resource`, optional
+  `kind`/`transition`/`evidence`, `producers` and `consumers` (`{dispatch, nodes[], how}`). It is drawn as a
+  bold purple box and checked like a UAV flow, including against a conditional producer.
+- **`dispatches[].conditional`**: the dispatch may be skipped. `validate` warns when a later read's only
+  producers are conditional and the resource is not in `frameStart.initialisedResources`.
 - **`rules`**: forbid any live node (optionally only of the listed launch modes and dispatches) from reading
   a resource in the given register space.
 
