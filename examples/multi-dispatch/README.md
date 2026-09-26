@@ -15,6 +15,19 @@ A minimal two-stage frame, the shape of a "generate, then rasterise" renderer:
 The only hand-written input is [`pipeline.config.json`](pipeline.config.json) - the three dispatch definitions
 (entry, entry record, defines). Everything else in `gen/` is read from the compiled DXIL.
 
+## The rendered frame
+
+`pipeline` merges the three dispatches into one frame diagram, in the order the config lists them:
+
+![The three dispatches of the multi-dispatch example: produce, consume-color, consume-stats](gen/frame.png)
+
+Each package is one `DispatchGraph` call, holding the nodes reachable from its entry. Solid arrows are records
+inside a dispatch; the cylinders are the UAVs, with dashed edges between dispatches (red = write, orange =
+atomic, blue = read): `produce` writes `items` and counts into `counters`, both consumer dispatches read them.
+Each consumer's title shows its entry record and what `pass` reaches (copied into `FanOutRecord.pass` and
+`ItemRef.pass`); only `consume-stats`, compiled with `WITH_STATS`, has `ShadeNode`'s extra atomic write to
+`counters`. The legend lists the global resources and which parts came from the config.
+
 ## Reproduce `gen/`
 
 ```sh
