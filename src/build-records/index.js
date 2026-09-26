@@ -33,8 +33,10 @@ const ROLE_TITLES = {
 // Highlight classes: one colour per kind of special function, shared by both styles.
 const KINDS = {
     semantic: { colour: '#C0392B', back: '#FADBD8', label: 'system value (SV_DispatchGrid): sizes the consumer\'s dispatch grid' },
-    index: { colour: '#1F618D', back: '#D6EAF8', label: 'index into a buffer' },
-    control: { colour: '#9A6700', back: '#FCF3CF', label: 'control value (pass identity, flags)' },
+    index: { colour: '#1F618D', back: '#D6EAF8', label: 'indexes a buffer (DXIL dataflow)' },
+    sizing: { colour: '#6C3483', back: '#EBDEF0', label: 'affects an output allocation count (DXIL dataflow)' },
+    control: { colour: '#9A6700', back: '#FCF3CF', label: 'annotation-only role (supplied by --annotations)' },
+    unread: { colour: '#95A5A6', back: '#FFFFFF', label: 'written but never read by any node (DXIL dataflow)' },
     padding: { colour: '#7F8C8D', back: '#EAEDED', label: 'implicit padding (no field)' },
 };
 
@@ -54,6 +56,7 @@ Options:
                              "note": "...", "target": "<buffer>",
                              "evidence": "file:line" } }
   --comments / --no-comments Show each field's source comment. Default: on.
+  --columns <n>              Class style: boxes per row within a group. Default: 4.
   --help, -h, -?             Show this help text and exit.
 `);
 }
@@ -64,6 +67,7 @@ function run(argv) {
         { name: 'roles', flag: '--roles', type: 'string', default: null },
         { name: 'annotations', flag: '--annotations', type: 'string', default: null },
         { name: 'comments', flag: '--comments', negFlag: '--no-comments', type: 'boolean', default: true },
+        { name: 'columns', flag: '--columns', type: 'string', default: '4' },
     ]);
     if (help) {
         printHelp();
@@ -79,7 +83,7 @@ function run(argv) {
     const types = Object.entries(ir.recordTypes)
         .map(([name, t]) => ({ name, ...t, role: ROLE_ORDER.find((r) => t.roles.includes(r)), rows: rowsOf(name, t, annotations) }))
         .filter((t) => roles.includes(t.role));
-    const opts = { comments: values.comments };
+    const opts = { comments: values.comments, columns: Math.max(1, Number(values.columns) || 4) };
     const puml = values.style === 'yaml' ? renderYaml(types, opts) : renderClass(types, opts);
     fs.writeFileSync(outFile, puml, 'utf8');
     console.log(`Wrote ${outFile} (${types.length} record type(s), style ${values.style}).`);
@@ -93,8 +97,16 @@ function rowsOf(typeName, t, annotations) {
     for (const f of t.fields) {
         if (f.offsetBytes > cursor) pad(cursor, f.offsetBytes - cursor);
         const a = annotations[`${typeName}.${f.name}`] || null;
-        const kind = f.semantic ? 'semantic' : a ? a.kind || 'control' : null;
-        rows.push({ ...f, annotation: a, kind });
+        const d = f.dataflow || null;
+        const inferredIndex = d ? [...new Set(d.indexes.map((i) => i.resource))] : [];
+        const sizes = d ? [...new Set(d.sizesOutputs.map((x) => x.output))] : [];
+        let kind = null;
+        if (f.semantic) kind = 'semantic';
+        else if (inferredIndex.length) kind = 'index';
+        else if (sizes.length) kind = 'sizing';
+        else if (a) kind = a.kind === 'index' ? 'index' : 'control';
+        else if (d && d.writtenBy.length && !d.readBy.length) kind = 'unread';
+        rows.push({ ...f, annotation: a, kind, inferredIndex, sizes });
         cursor = Math.max(cursor, f.offsetBytes + f.sizeBytes);
     }
     if (t.sizeBytes > cursor) pad(cursor, t.sizeBytes - cursor);
@@ -124,11 +136,31 @@ function usageLines(t) {
     return lines;
 }
 
+// What is known about a field, each part tagged with where it came from.
 function annotationText(r) {
-    if (r.semantic) return r.semantic === 'SV_DispatchGrid' ? 'SV_DispatchGrid (verified in DXIL metadata)' : `${r.semantic} (source)`;
-    if (!r.annotation) return null;
-    return [r.annotation.target ? `→ ${r.annotation.target}[]` : null, r.annotation.note].filter(Boolean).join(' ');
+    const parts = [];
+    if (r.semantic) parts.push(r.semantic === 'SV_DispatchGrid' ? 'SV_DispatchGrid (DXIL metadata)' : `${r.semantic} (source)`);
+    if (r.inferredIndex && r.inferredIndex.length) parts.push(`→ ${r.inferredIndex.map((x) => `${x}[]`).join(', ')} (DXIL)`);
+    if (r.sizes && r.sizes.length) parts.push(`count of → ${capList(r.sizes)} (DXIL)`);
+    if (r.dataflow && r.semantic && r.dataflow.sources.length) parts.push(`← ${capList(foldSources(r.dataflow.sources))}`);
+    if (r.kind === 'unread') parts.push('never read by a node');
+    if (r.annotation) {
+        const a = r.annotation;
+        const confirmed = a.kind === 'index' && a.target && (r.inferredIndex || []).includes(a.target);
+        if (!confirmed) parts.push(`${[a.target ? `→ ${a.target}[]` : null, a.note].filter(Boolean).join(' ')} (annotation)`);
+        else if (a.note) parts.push(`${a.note} (annotation)`);
+    }
+    return parts.length ? parts.join('; ') : null;
 }
+
+// Sources folded to field level (vector components and array elements merged), constants dropped
+// when anything else is known, capped so one field cannot widen the whole diagram.
+function foldSources(sources) {
+    const folded = sources.map((s) => s.replace(/\[[^\]]*\](?=\.|$)/g, (m) => (/^\[\d+\]$/.test(m) && s.startsWith('buf:') && !/\w\[/.test(s) ? m : '')).replace(/\.[xyzw]$/, ''));
+    const nonConst = folded.filter((s) => !s.startsWith('const:'));
+    return [...new Set(nonConst.length ? nonConst : folded)].map((s) => s.replace(/^buf:/, '').replace(/^in:/, 'in ').replace(/^sv:/, '').replace(/^const:/, ''));
+}
+const capList = (xs, n = 3) => (xs.length > n ? `${xs.slice(0, n).join(', ')} +${xs.length - n}` : xs.join(', '));
 
 // ---- class diagram ----------------------------------------------------------
 
@@ -138,7 +170,7 @@ function renderClass(types, opts) {
         'skinparam class {', '  BackgroundColor #FFFFFF', '  BorderColor #5D6D7E',
         '  BackgroundColor<<cpu-entry-record>> #E8F8F5', '  BackgroundColor<<node-record>> #EBF5FB',
         '  BackgroundColor<<buffer-element>> #FEF9E7', '  BackgroundColor<<nested>> #F4F6F6', '}',
-        'skinparam packageStyle rectangle', 'left to right direction', ''];
+        'skinparam packageStyle rectangle', ''];
     for (const role of ROLE_ORDER) {
         const group = types.filter((t) => t.role === role);
         if (!group.length) continue;
@@ -149,7 +181,7 @@ function renderClass(types, opts) {
             L.push(`  class ${t.name} <<${t.role}>> {`);
             L.push(`    {field} <size:10><color:#5D6D7E>${pumlEscape(extra.join(' · '))}</color></size>`);
             L.push('    ==');
-            for (const r of t.rows) L.push(`    {field} ${classRow(r, opts)}`);
+            for (const r of t.rows) for (const line of classRow(r, opts)) L.push(`    {field} ${line}`);
             const usage = usageLines(t);
             if (usage.length) {
                 L.push('    ..');
@@ -159,6 +191,19 @@ function renderClass(types, opts) {
         }
         L.push('}');
     }
+    // Grid layout: Graphviz would otherwise put every box of a group in one row. Hidden links from
+    // each box to the one `columns` places later stack the rows; the last row of a group points at
+    // the next group's first box so groups stack too.
+    const ordered = ROLE_ORDER.flatMap((role) => types.filter((t) => t.role === role));
+    for (const role of ROLE_ORDER) {
+        const group = types.filter((t) => t.role === role);
+        for (let i = 0; i + opts.columns < group.length; i++) L.push(`${group[i].name} -[hidden]down- ${group[i + opts.columns].name}`);
+    }
+    for (let r = 0; r + 1 < ROLE_ORDER.length; r++) {
+        const a = types.filter((t) => t.role === ROLE_ORDER[r]);
+        const b = ordered.find((t) => ROLE_ORDER.indexOf(t.role) > r);
+        if (a.length && b) L.push(`${a[a.length - 1].name} -[hidden]down- ${b.name}`);
+    }
     // Composition: a struct field whose type is another struct.
     for (const t of types) {
         for (const r of t.rows) {
@@ -167,21 +212,24 @@ function renderClass(types, opts) {
     }
     L.push('', 'legend right');
     for (const [, k] of Object.entries(KINDS)) L.push(`  <back:${k.back}><color:${k.colour}><b>  field  </b></color></back> ${pumlEscape(k.label)}`);
-    L.push('  offsets in bytes; layout from DXIL debug info (-Zi), SV_DispatchGrid from DXIL node metadata', 'endlegend', '@enduml');
+    L.push('  offsets in bytes; layout from DXIL debug info (-Zi), SV_DispatchGrid from DXIL node metadata;',
+        '  (DXIL) = inferred from the compiled shaders, (annotation) = supplied by an --annotations file', 'endlegend', '@enduml');
     return L.join('\n');
 }
 
+// One line for the field itself, then one indented line each for what is known about it and its
+// source comment, so a long note makes a box taller rather than the whole diagram wider.
 function classRow(r, opts) {
-    if (r.padding) return `<back:${KINDS.padding.back}><color:${KINDS.padding.colour}><i>${hex(r.offsetBytes)}  (${r.sizeBytes} B padding)</i></color></back>`;
+    if (r.padding) return [`<back:${KINDS.padding.back}><color:${KINDS.padding.colour}><i>${hex(r.offsetBytes)}  (${r.sizeBytes} B padding)</i></color></back>`];
     let body = `${hex(r.offsetBytes)}  ${pumlEscape(typeText(r)).padEnd(14, ' ')} ${pumlEscape(r.name)}`;
+    const k = r.kind ? KINDS[r.kind] : null;
+    if (k) body = `<back:${k.back}><color:${k.colour}><b>${body}</b></color></back>`;
+    const lines = [body];
     const note = annotationText(r);
-    if (r.kind) {
-        const k = KINDS[r.kind];
-        body = `<back:${k.back}><color:${k.colour}><b>${body}</b></color></back>`;
-        if (note) body += `  <color:${k.colour}><size:10>${pumlEscape(note)}</size></color>`;
-    }
-    if (opts.comments && r.comment) body += `  <color:#95A5A6><size:9>// ${pumlEscape(clip(r.comment, 70))}</size></color>`;
-    return body;
+    const indent = '<color:#FFFFFF>.</color>      ';
+    if (note) lines.push(`${indent}<size:9><color:${k ? k.colour : '#5D6D7E'}>${pumlEscape(note)}</color></size>`);
+    if (opts.comments && r.comment) lines.push(`${indent}<color:#95A5A6><size:9>// ${pumlEscape(clip(r.comment, 80))}</size></color>`);
+    return lines;
 }
 
 // ---- YAML diagram -----------------------------------------------------------

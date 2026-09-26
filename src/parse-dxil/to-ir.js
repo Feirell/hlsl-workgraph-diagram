@@ -27,6 +27,7 @@ const {
 } = require('./dxil-metadata');
 const { accessLabel, findOutputAllocations, findGroupSharedBytes } = require('./resource-access');
 const { decodeIOFlags, decodeDispatchGridField, findStructTypes, collectLayouts } = require('./record-layouts');
+const { analyseFunction, handleMap } = require('./dataflow');
 const { extractFunctionBody } = require('./dxil-metadata');
 const { extractOriginalAttrs } = require('./original-attrs');
 const { collectConstants, annotateExpr } = require('./constants');
@@ -170,6 +171,20 @@ function buildIr(dis, resolveId, generatorDetail) {
     }
 
     const globals = (resources || []).map(resourceToIr);
+    const structTypes = findStructTypes(dis.rawMap, resolveId);
+    const allLayouts = collectLayouts([...structTypes.keys()], structTypes, sourceFiles, normalizePath);
+    const resourceElementType = Object.fromEntries(globals.map((g) => [g.name, g.valueType]));
+    for (const n of nodes) {
+        const body = extractFunctionBody(dis.text, n.functionName);
+        n.dataflow = analyseFunction(body, {
+            handleGlobal: handleMap(body, resources),
+            resourceElementType,
+            recordLayouts: allLayouts,
+            inputTypes: n.inputs.map((p) => p.recordType),
+            outputTypes: n.outputs.map((p) => p.recordType),
+            outputTargets: n.outputs.map((p) => (p.linkedNodeID ? p.linkedNodeID.name : null)),
+        });
+    }
     return {
         generator: 'parse-dxil',
         generatorDetail,
@@ -222,7 +237,97 @@ function buildRecordTypes(nodes, globals, dis, resolveId, sourceFiles) {
         }
         out[name] = { ...layout, roles, usage: { producers: [...new Set(u.producers)], consumers: [...new Set(u.consumers)], buffers: u.buffers }, dxil: u.dxil };
     }
+    attachFieldDataflow(out, nodes, globals);
     return out;
+}
+
+// Per-field aggregation of every node's dataflow, keyed by the field's top-level
+// name (array elements and vector components fold into their field):
+//   readBy / writtenBy   node ids (node records) or node ids touching the buffer field
+//   sources              where written values come from (in:/buf:/sv:/const:)
+//   indexes              resources this field is used to index, directly (by a consumer)
+//                        or via: another record field it is copied into
+//   sizesOutputs         outputs whose allocation count depends on it
+//   flowsTo              record/buffer fields its value is written into
+function attachFieldDataflow(types, nodes, globals) {
+    const top = (f) => f.replace(/\[[^\]]*\]/g, '').replace(/\.[xyzw]$/, '').split('.')[0];
+    const fieldOf = (type, f) => (types[type] ? types[type].fields.find((x) => x.name === top(f)) : null);
+    const newDf = () => ({ readBy: [], writtenBy: [], sources: [], indexes: [], sizesOutputs: [], flowsTo: [] });
+    // Every struct level along a field path ("metaData.vertex.offset" in FloorRecord also touches
+    // BuildingMetaData.vertex and ArrayPointer.offset), so nested types get their own dataflow.
+    const dfAll = (type, path) => {
+        const out = [];
+        let t = type;
+        const segs = path.replace(/\[[^\]]*\]/g, '').split('.');
+        for (const seg of segs) {
+            const x = types[t] && types[t].fields.find((f) => f.name === seg);
+            if (!x) break;
+            out.push((x.dataflow = x.dataflow || newDf()));
+            if (!x.structType) break;
+            t = x.structType;
+        }
+        return out;
+    };
+    const df = (type, f) => dfAll(type, f)[0] || null;
+    const push = (arr, v) => { if (!arr.some((a) => JSON.stringify(a) === JSON.stringify(v))) arr.push(v); };
+    const parseSource = (s) => {
+        let m;
+        if ((m = s.match(/^in:(\w+)\.(.+)$/))) return { type: m[1], field: m[2] };
+        if ((m = s.match(/^buf:(\w+)\.(.+)$/))) return { resource: m[1], field: m[2] };
+        return null;
+    };
+    const elemType = Object.fromEntries(globals.map((g) => [g.name, g.valueType]));
+    for (const n of nodes) {
+        const d = n.dataflow;
+        if (!d) continue;
+        for (const [type, fields] of Object.entries(d.inputFieldsRead)) for (const f of fields) for (const x of dfAll(type, f)) push(x.readBy, n.id);
+        for (const w of Object.values(d.outputFieldsWritten)) {
+            for (const [f, sources] of Object.entries(w.fields)) {
+                const xs = dfAll(w.recordType, f);
+                if (!xs.length) continue;
+                for (const x of xs) push(x.writtenBy, n.id);
+                for (const s of sources) {
+                    for (const x of xs) push(x.sources, s);
+                    const from = parseSource(s);
+                    const target = `${w.recordType}.${top(f)}`;
+                    if (from && from.type) { const y = df(from.type, from.field); if (y) push(y.flowsTo, target); }
+                    if (from && from.resource) { const y = df(elemType[from.resource], from.field); if (y) push(y.flowsTo, target); }
+                }
+            }
+        }
+        for (const [o, sources] of Object.entries(d.outputAllocationSources)) {
+            for (const s of sources) {
+                const from = parseSource(s);
+                const xs = from ? (from.type ? dfAll(from.type, from.field) : dfAll(elemType[from.resource], from.field)) : [];
+                for (const x of xs) push(x.sizesOutputs, { node: n.id, output: n.outputs[o] && n.outputs[o].linkedNodeID ? n.outputs[o].linkedNodeID.name : o });
+            }
+        }
+        for (const [res, e] of Object.entries(d.resources)) {
+            for (const [f, kinds] of Object.entries(e.fields)) {
+                for (const x of dfAll(elemType[res], f)) {
+                    if (kinds.includes('read') || kinds.includes('atomic')) push(x.readBy, n.id);
+                    if (kinds.includes('write') || kinds.includes('atomic')) push(x.writtenBy, n.id);
+                }
+            }
+            for (const s of Object.keys(e.indexedBy)) {
+                const from = parseSource(s);
+                const xs = from ? (from.type ? dfAll(from.type, from.field) : dfAll(elemType[from.resource], from.field)) : [];
+                for (const x of xs) push(x.indexes, { resource: res, node: n.id, via: null });
+            }
+        }
+    }
+    // One level of composition: a field copied into a record field that indexes a resource indexes it too.
+    for (const [type, t] of Object.entries(types)) {
+        for (const f of t.fields) {
+            if (!f.dataflow) continue;
+            for (const target of f.dataflow.flowsTo) {
+                const [tt, tf] = target.split('.');
+                const y = fieldOf(tt, tf);
+                if (!y || !y.dataflow) continue;
+                for (const ix of y.dataflow.indexes.filter((i) => !i.via)) push(f.dataflow.indexes, { resource: ix.resource, node: ix.node, via: target });
+            }
+        }
+    }
 }
 
 function dxilRecordFacts(p) {

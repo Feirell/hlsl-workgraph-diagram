@@ -81,12 +81,21 @@ Options:
   --node-comments / --no-node-comments
                                    Show each node's leading source comment
                                    in its box. Default: on.
-  --dispatches <plan.json>         Render the multi-dispatch view instead:
+  --global-fields / --no-global-fields
+                                   With parse-dxil access data, append the
+                                   element fields each global is read or
+                                   written through. Default: off.
+  --edge-record-size / --no-edge-record-size
+                                   Add the record's byte size (from DXIL) to
+                                   each edge note. Default: off.
+  --dispatches <plan.json|auto>    Render the multi-dispatch view instead:
                                    one package per DispatchGraph call in
                                    the plan (see docs/dispatch-plan.md),
                                    each holding the subgraph reachable from
                                    its entry, plus UAV boxes with the
                                    write/atomic/read edges between them.
+                                   "auto" infers one dispatch per program
+                                   entry (order unknown) - no plan needed.
                                    Uses the IR's optional globalAccess and
                                    output allocation fields when present.
   --verbose, -v                    Print each node/edge/global found, and
@@ -133,6 +142,7 @@ function run(argv) {
                 recordKind: out.recordKind,
                 maxRecords: out.maxRecords,
                 maxRecordsSharedWith: out.maxRecordsSharedWith,
+                recordSizeBytes: out.recordSizeBytes ?? null,
             });
         }
     }
@@ -157,7 +167,7 @@ function run(argv) {
     };
     let puml;
     if (opts.dispatches) {
-        const plan = loadPlan(path.resolve(opts.dispatches));
+        const plan = loadPlan(opts.dispatches === 'auto' ? 'auto' : path.resolve(opts.dispatches), nodes);
         const analysis = analysePlan(plan, nodes);
         for (const d of analysis.dispatches) {
             log.info(`dispatch ${d.id} (${d.entry}): ${d.analysis.nodeIds.length} node(s), ${d.analysis.deadIds.size} never launched.`);

@@ -176,6 +176,20 @@ filesystem or network. `--verbose`/`-v` - print per-file/per-node/per-global/per
 and the exact system commands issued (`dxc` invocations, HTTP requests, PNG/SVG writes), instead of just
 the terse summary counts.
 
+## What is inferred, and what can be supplied
+
+Everything `parse-dxil` writes is read from the compiled DXIL (plus the source text dxc embeds with `-Zi`); no
+hand-written input is needed for any diagram or check. Two optional files add what a compiler cannot know:
+
+- a **dispatch plan** (`--dispatches plan.json`): the host-side order of `DispatchGraph` calls, programs, bindings,
+  render-target flows. Without one, `--dispatches auto` infers one dispatch per program entry (order unknown).
+- **record annotations** (`build-records`/`validate --annotations`): the *role* of a field the dataflow cannot
+  name (e.g. "pass identity"). Index relationships need no annotation - they are inferred - and an annotation
+  that claims one is checked against the inference.
+
+Both are plain JSON, so they can be written by hand or generated (e.g. by an LLM); diagrams mark what came from
+them: `(annotation)` on record fields, and the dispatch legend lists what the plan supplied.
+
 ## Multi-dispatch frames and validation
 
 A work graph dispatched several times per frame (e.g. a generation dispatch followed by raster dispatches that
@@ -187,6 +201,10 @@ hlsl-workgraph-diagram parse-dxil shaders/GraphNodes.hlsl graph.ir.json --profil
 hlsl-workgraph-diagram build-puml graph.ir.json frame.puml --dispatches plan.json --short --no-node-comments
 hlsl-workgraph-diagram validate graph.ir.json --dispatches plan.json --inventory startup-log.txt
 ```
+
+Node boxes list **Globals read** and **Globals written** separately (atomics marked with their op) between
+`Record in` and `Record out`; `--global-fields` adds the element fields touched. `--edge-record-size` adds each
+record's byte size to the edge notes.
 
 `validate` checks the spec's node output limits (which DXC does not check; only `CreateStateObject` does),
 edge record types and sizes, reachability per dispatch, statically dead edges, cross-dispatch read-before-write
@@ -204,12 +222,16 @@ type, or is nested in one of those, with each field's byte offset, type, array s
 hlsl-workgraph-diagram build-records graph.ir.json records.puml --style class --annotations record-annotations.json
 ```
 
-Highlighted fields: `SV_DispatchGrid` (taken from the DXIL node metadata, so it is the field the runtime
-really reads - offset, component type and count), implicit padding, and whatever `--annotations` marks
-(`{"Type.field": {"kind": "index"|"control", "target": "<buffer>", "note": "...", "evidence": "file:line"}}`).
+Highlighted fields, all inferred unless marked `(annotation)`: `SV_DispatchGrid` (from the DXIL node metadata,
+with the values it is computed from), fields that **index a buffer** (dataflow: the value reaches a buffer
+access's index operand, directly or after being copied into another record's field), fields that **affect an
+output's allocation count**, fields **written but never read** by any node, implicit padding, and whatever
+`--annotations` adds (`{"Type.field": {"kind": "index"|"control", "target": "<buffer>", "note": "...",
+"evidence": "file:line"}}`; keys starting with `_` are comments). `--columns <n>` sets boxes per row.
 Record flags from the node-IO metadata (RW input, `NodeTrackRWInputSharing`, `globallycoherent`) are shown
-per type. `validate` cross-checks debug-info size against the DXIL record size, the source `: SV_DispatchGrid`
-against the metadata, and that every annotation names a real field and resource.
+per type. `validate` cross-checks debug-info size against the DXIL record size and the source `: SV_DispatchGrid`
+against the metadata; per edge, that every field the consumer reads is written by the producer (the
+allocate-without-write bug class); lists fields never read; and checks every annotation against the IR.
 
 **What needs `-Zi`:** field names, offsets by name, nested type names and comments come from debug info and
 the embedded source, which `parse-dxil` always requests. Without them only the record size, alignment, the

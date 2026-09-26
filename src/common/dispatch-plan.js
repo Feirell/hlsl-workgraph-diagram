@@ -18,7 +18,19 @@
 
 const fs = require('fs');
 
-function loadPlan(file) {
+// "auto": a plan inferred from the graph alone - one dispatch per [NodeIsProgramEntry] node. The
+// dispatch ORDER is host code, so it is unknown here and order-dependent checks are skipped.
+function autoPlan(nodes) {
+    const entries = nodes.filter((n) => n.isEntry).map((n) => n.id).sort();
+    return {
+        auto: true,
+        title: 'One dispatch per program entry (inferred; order unknown)',
+        dispatches: entries.map((id, i) => ({ id: String.fromCharCode(65 + i), label: id, entry: id })),
+    };
+}
+
+function loadPlan(file, nodes) {
+    if (file === 'auto') return autoPlan(nodes || []);
     const plan = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (!Array.isArray(plan.dispatches) || plan.dispatches.length === 0) {
         throw new Error(`${file}: "dispatches" must be a non-empty array`);
@@ -125,4 +137,4 @@ function analysePlan(plan, nodes) {
     return { nodesById, edges, dispatches };
 }
 
-module.exports = { loadPlan, buildEdges, analyseDispatch, dispatchAccess, analysePlan };
+module.exports = { autoPlan, loadPlan, buildEdges, analyseDispatch, dispatchAccess, analysePlan };

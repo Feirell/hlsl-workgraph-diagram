@@ -33,7 +33,9 @@ sequence (reachability, cross-dispatch UAV hazards, plan rules) and, with
 --inventory, compares against a runtime [WorkGraph] node inventory.
 
 Options:
-  --dispatches <plan.json>   Dispatch plan (see docs/dispatch-plan.md).
+  --dispatches <plan.json|auto>
+                             Dispatch plan (see docs/dispatch-plan.md), or
+                             "auto": one dispatch per entry, order unknown.
   --inventory <file>         Text containing the app's "[WorkGraph]" startup
                              lines (program / node / entrypoint listing).
   --annotations <file.json>  Record-field annotations (build-records): check
@@ -71,7 +73,7 @@ function run(argv) {
 
     let plan = null;
     if (values.dispatches) {
-        plan = loadPlan(path.resolve(values.dispatches));
+        plan = loadPlan(values.dispatches === 'auto' ? 'auto' : path.resolve(values.dispatches), ir.nodes);
         checkPlan(plan, ir, report);
     }
     if (values.inventory) checkInventory(path.resolve(values.inventory), nodes, plan, report);
@@ -130,6 +132,7 @@ function checkRecordTypes(ir, annotations, report) {
                 `${name}: metadata ${dg ? `+${dg.offsetBytes} ${dg.componentType} x${dg.count}` : 'none'}, source ${src.map((x) => x.name).join(', ') || 'none'}`);
         }
     }
+    checkFieldDataflow(ir, report);
     if (!annotations) return;
     const globals = new Set((ir.globals || []).map((g) => g.name));
     for (const [key, a] of Object.entries(annotations)) {
@@ -138,7 +141,42 @@ function checkRecordTypes(ir, annotations, report) {
         const t = ir.recordTypes[type];
         if (!t || !t.fields.some((f) => f.name === field)) report('FAIL', 'record-annotation', `${key}: no such record field`);
         else if (a.target && !globals.has(a.target)) report('FAIL', 'record-annotation', `${key}: target ${a.target} is not a resource in the IR`);
-        else report('PASS', 'record-annotation', `${key}: ${a.kind}${a.target ? ` -> ${a.target}` : ''}`);
+        else if (a.kind === 'index' && a.target) {
+            // An index claim is checkable against the DXIL dataflow; everything else is annotation-only.
+            const f = t.fields.find((x) => x.name === field);
+            const hit = ((f.dataflow && f.dataflow.indexes) || []).find((i) => i.resource === a.target);
+            if (hit) report('PASS', 'record-annotation', `${key}: index -> ${a.target} confirmed by DXIL dataflow (${hit.node}${hit.via ? `, via ${hit.via}` : ''})`);
+            else report('WARN', 'record-annotation', `${key}: annotated as index -> ${a.target}, but the DXIL dataflow does not show it`);
+        } else report('INFO', 'record-annotation', `${key}: ${a.kind} (annotation only, not checkable from DXIL)`);
+    }
+}
+
+// Per edge: every field the consumer reads must be written by every producer on that edge - a field
+// read but never written is the allocate-without-write class of bug (undefined record contents).
+// Conservative in the other direction: a write on any path counts as written.
+function checkFieldDataflow(ir, report) {
+    if (!ir.nodes.some((n) => n.dataflow)) return;
+    const edges = buildEdges(ir.nodes);
+    for (const consumer of ir.nodes) {
+        const input = consumer.inputs[0];
+        if (!input || !input.recordType || !consumer.dataflow) continue;
+        const read = new Set((consumer.dataflow.inputFieldsRead[input.recordType] || []).map((f) => f.split(/[.[]/)[0]));
+        for (const e of edges.filter((x) => x.to === consumer.id)) {
+            const producer = ir.nodes.find((n) => n.id === e.from);
+            const out = producer.dataflow && producer.dataflow.outputFieldsWritten[e.outputIndex];
+            const written = new Set(Object.keys((out && out.fields) || {}).map((f) => f.split(/[.[]/)[0]));
+            const missing = [...read].filter((f) => !written.has(f));
+            if (!missing.length) report('PASS', 'field-initialised', `${e.from} -> ${consumer.id}: every field ${consumer.id} reads is written (${[...read].join(', ') || 'none read'})`);
+            else report(e.dead ? 'INFO' : 'WARN', 'field-initialised', `${e.from} -> ${consumer.id}: reads ${missing.join(', ')} of ${input.recordType}, never written by ${e.from}${e.dead ? ' (edge is statically dead)' : ''}`);
+        }
+    }
+    for (const [type, t] of Object.entries(ir.recordTypes || {})) {
+        if (!t.roles.includes('node-record') && !t.roles.includes('buffer-element')) continue;
+        for (const f of t.fields) {
+            const d = f.dataflow;
+            if (!d || f.semantic) continue;
+            if (d.writtenBy.length && !d.readBy.length) report('INFO', 'field-unread', `${type}.${f.name}: written by ${d.writtenBy.join(', ')}, never read by any node (the CPU may still read it back)`);
+        }
     }
 }
 
@@ -207,8 +245,11 @@ function checkPlan(plan, ir, report) {
     if (!ir.nodes.some((n) => n.globalAccess)) {
         report('WARN', 'uav-hazards', 'IR has no globalAccess (parse-source, or an older parse-dxil): cross-dispatch data flow not checked');
     } else {
-        checkUavFlow(plan, dispatches, globalsByName, report);
-        checkAttachmentFlows(plan, dispatches, report);
+        if (plan.auto) report('INFO', 'uav-hazards', 'dispatch order unknown (--dispatches auto): cross-dispatch read-before-write not checked');
+        else {
+            checkUavFlow(plan, dispatches, globalsByName, report);
+            checkAttachmentFlows(plan, dispatches, report);
+        }
         checkRules(plan, dispatches, nodesById, globalsByName, report);
     }
 }

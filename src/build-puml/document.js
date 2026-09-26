@@ -171,6 +171,7 @@ function renderPlantUml(nodes, edges, externalIds, globals, opts, provenance = {
             labelParts.push(`<i>${recordTypeSpanFor(e.recordType, theme)}</i>${countBraces}`);
         }
         if (e.varName) labelParts.push(`<size:8>${e.varName}</size>`);
+        if (opts.edgeRecordSize && e.recordSizeBytes != null) labelParts.push(`<size:8>${e.recordSizeBytes} B/record</size>`);
         if (e.maxRecordsSharedWith) {
             labelParts.push(`<size:9>shared: ${formatScalarInline(e.maxRecordsSharedWith)}${scalarTotalSuffix(e.maxRecordsSharedWith)}</size>`);
         }

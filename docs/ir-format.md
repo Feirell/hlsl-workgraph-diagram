@@ -71,6 +71,20 @@ source text instead - the same category of computation `parse-source` uses for e
 scope here (decorating identifiers, not computing the field's own total, which stays compiler-derived either
 way).
 
+## `dataflow` per node (parse-dxil only, optional)
+
+`n.dataflow`, from a fixed-point source analysis of the node's compiled function (`../src/parse-dxil/dataflow.js`):
+- `inputFieldsRead`: `{ RecordType: [fieldPath] }` - input record fields loaded (paths like `metaData.vertex.offset`, `vertices[2]`).
+- `outputFieldsWritten`: `{ outputIndex: { target, recordType, fields: { fieldPath: [source] } } }`.
+- `outputAllocationSources`: `{ outputIndex: [source] }` - what the allocation count depends on.
+- `resources`: `{ name: { access, fields: {field: [kind]}, constIndices: {i: [kind]}, indexedBy: {source: [kind]}, valuesFrom: [source], atomicOps } }`.
+  `fields` maps a constant element offset onto the element struct's layout (`(dynamic offset)` when not constant);
+  `constIndices` lists constant element indices for scalar-element buffers (e.g. counter slots).
+
+Source strings: `in:<Type>.<field>`, `buf:<resource>.<field>` / `buf:<resource>[i]`, `sv:<SV_name>.<axis>`,
+`const:<value>`, `local` (only visible through local/groupshared memory). Data dependence only: a value that
+influences another solely through a branch condition is not a source.
+
 ## `recordTypes` (parse-dxil only, optional)
 
 `{ [structName]: { sizeBytes, alignBytes, file, line, roles, usage, dxil, fields } }`:
@@ -83,6 +97,10 @@ way).
   `semantic` is `SV_DispatchGrid` when the field's offset matches the metadata entry (authoritative), else the
   `: SV_*` text found on the field's source line. `comment` is the field's trailing `//` comment or the
   comment block right above it.
+- `fields[].dataflow` (when any node touches the field): `{ readBy, writtenBy, sources, indexes: [{resource, node, via}],
+  sizesOutputs: [{node, output}], flowsTo: ["Type.field"] }`, aggregated over every node's `dataflow`; a nested
+  path is attributed to every struct level along it. `indexes[].via` names the record field the value was
+  copied into when the indexing happens one hop later.
 
 Node params additionally carry `ioFlags` (decoded NodeIOFlags) and `dispatchGridField`.
 

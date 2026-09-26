@@ -75,6 +75,9 @@ function renderDispatchPlantUml(ir, plan, planAnalysis, opts, provenance = {}) {
                 ...n,
                 depth: d.analysis.depth.get(id),
                 globalsUsed: (n.globalsUsed || []).filter((g) => !boxedNames.has(g) && !hidden.has(g)),
+                globalAccess: n.globalAccess
+                    ? Object.fromEntries(Object.entries(n.globalAccess).filter(([g]) => !boxedNames.has(g) && !hidden.has(g)))
+                    : undefined,
             };
             let label = buildLabel(view, classifyGrid(view, opts.shortGridThreadsCount), theme, globalsByName, opts);
             if (n.launchMode === 'mesh' && Object.prototype.hasOwnProperty.call(pixelShaders, id)) {
@@ -118,7 +121,10 @@ function renderDispatchPlantUml(ir, plan, planAnalysis, opts, provenance = {}) {
             lines.push(`${nodeAlias(d.id, e.from)} ${arrow} ${nodeAlias(d.id, e.to)}`);
             if (!opts.edgeLabel) continue;
             const parts = [`<i>${recordTypeSpanFor(e.recordType, theme)}</i>${edgeRecordCountBraces(e.maxRecords)}`];
-            if (e.recordSizeBytes != null) parts.push(`<size:8>${e.recordSizeBytes} B/record</size>`);
+            // Same edge note as the single-graph view (record type, count, output parameter name);
+            // the record's byte size only when asked for.
+            if (e.varName) parts.push(`<size:8>${e.varName}</size>`);
+            if (opts.edgeRecordSize && e.recordSizeBytes != null) parts.push(`<size:8>${e.recordSizeBytes} B/record</size>`);
             if (e.dead) parts.push('<size:8><b>0 records allocated (dead edge)</b></size>');
             lines.push('note on link');
             for (const p of parts) lines.push(`  ${pumlEscape(p)}`);
@@ -167,6 +173,9 @@ function renderDispatchPlantUml(ir, plan, planAnalysis, opts, provenance = {}) {
             `  |${pad(pumlEscape(d.id))}|${pad(pumlEscape(d.label || ''))}|${pad(pumlEscape(d.entry))}|${pad(pumlEscape(d.program || '?'))}|${pad(pumlEscape(d.bindings || '-'))}|${pad(`${live}/${d.analysis.deadIds.size}`)}|`
         );
     }
+    // Provenance: everything outside the node boxes and their edges that came from the plan file.
+    if (plan.auto) lines.push('  Dispatches inferred: one per [NodeIsProgramEntry] node; their order is host code and unknown here');
+    else lines.push('  <i>From the dispatch plan file (not inferred): dispatch order, titles, programs, bindings, entry-record text,</i>\\n  <i>conditions, notes, pixel-shader lines, purple flows, hidden resources. Everything else is read from the DXIL.</i>');
     if (plan.betweenDispatches) lines.push(`  Between dispatches: ${pumlEscape(plan.betweenDispatches)}`);
     if (plan.frameStart && plan.frameStart.note) lines.push(`  Frame start: ${pumlEscape(plan.frameStart.note)}`);
     lines.push('  ');
