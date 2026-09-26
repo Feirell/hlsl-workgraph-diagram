@@ -81,6 +81,9 @@ Options:
   --node-comments / --no-node-comments
                                    Show each node's leading source comment
                                    in its box. Default: on.
+  --hide-global <name>             Dispatch view: leave this resource out of
+                                   the UAV boxes and node lists (display
+                                   only; noted in the legend). Repeatable.
   --global-fields / --no-global-fields
                                    With parse-dxil access data, append the
                                    element fields each global is read or
@@ -119,6 +122,8 @@ function run(argv) {
     const outFile = path.resolve(/\.puml$/i.test(outArg) ? outArg : `${outArg}.puml`);
 
     const opts = resolveOpts(values);
+    // Repeatable: the shared parser keeps only the last value, so collect from argv.
+    opts.hideGlobals = argv.flatMap((a, i) => (a === '--hide-global' && argv[i + 1] ? [argv[i + 1]] : []));
 
     const ir = readIrFile(inFile);
     const nodes = ir.nodes || [];

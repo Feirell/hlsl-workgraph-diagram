@@ -19,7 +19,7 @@ const { pumlEscape } = require('../common/text-utils');
 const { THEMES } = require('../common/themes');
 const { launchStereotype, classifyGrid, buildLabel, edgeRecordCountBraces } = require('./node-label');
 const { globalBoxLabel, sanitizeAlias } = require('./global-boxes');
-const { renderPreamble, provenanceLines, recordTypeSpanFor } = require('./document');
+const { renderPreamble, renderGlobalTable, provenanceLines, recordTypeSpanFor } = require('./document');
 
 const nodeAlias = (dispatchId, id) => `${sanitizeAlias(dispatchId)}__${sanitizeAlias(id)}`;
 const resourceAlias = (name) => `res_${sanitizeAlias(name)}`;
@@ -32,7 +32,7 @@ function renderDispatchPlantUml(ir, plan, planAnalysis, opts, provenance = {}) {
     const theme = opts.dark ? THEMES.dark : THEMES.light;
     const globals = ir.globals || [];
     const globalsByName = new Map(globals.map((g) => [g.name, g]));
-    const hidden = new Set((plan.diagram && plan.diagram.hideResources) || []);
+    const hidden = new Set([...((plan.diagram && plan.diagram.hideResources) || []), ...(opts.hideGlobals || [])]);
     const { nodesById, dispatches } = planAnalysis;
 
     // UAVs drawn as boxes: every one some live node of some dispatch touches.
@@ -60,7 +60,7 @@ function renderDispatchPlantUml(ir, plan, planAnalysis, opts, provenance = {}) {
         const pixelShaders = program.meshNodePixelShaders || {};
         const title = [
             `<b>${pumlEscape(d.id)} · ${pumlEscape(d.label || d.entry)}</b>`,
-            `<size:10>entry ${pumlEscape(d.entry)} · program ${pumlEscape(d.program || '?')}${d.bindings ? ` · ${pumlEscape(d.bindings)}` : ''}</size>`,
+            `<size:10>${[`entry ${pumlEscape(d.entry)}`, d.program ? `program ${pumlEscape(d.program)}` : null, d.bindings ? pumlEscape(d.bindings) : null].filter(Boolean).join(' · ')}</size>`,
             d.entryRecord ? `<size:10>entry record: ${pumlEscape(d.entryRecord)}</size>` : null,
             d.conditional ? `<size:10><i>${pumlEscape(d.conditional)}</i></size>` : null,
             d.note ? `<size:10>${pumlEscape(d.note)}</size>` : null,
@@ -165,14 +165,18 @@ function renderDispatchPlantUml(ir, plan, planAnalysis, opts, provenance = {}) {
     const pad = (s) => `  ${s}  `;
     lines.push('');
     lines.push('legend right');
+    // Same global resource table as the single-graph view; "used" = used by a node of some dispatch.
+    const usedBy = new Map();
+    for (const d of dispatches) for (const id of d.analysis.nodeIds) for (const g of nodesById.get(id).globalsUsed || []) usedBy.set(g, [...(usedBy.get(g) || []), id]);
+    lines.push(...renderGlobalTable(globals, usedBy, theme));
     lines.push(`  <b>${pumlEscape(plan.title || 'Dispatch sequence')}</b>`);
-    lines.push(`  |${pad('#')}|${pad('Dispatch')}|${pad('Entry')}|${pad('Program')}|${pad('Bindings')}|${pad('Nodes (live/dead)')}|`);
-    for (const d of dispatches) {
-        const live = d.analysis.nodeIds.length - d.analysis.deadIds.size;
-        lines.push(
-            `  |${pad(pumlEscape(d.id))}|${pad(pumlEscape(d.label || ''))}|${pad(pumlEscape(d.entry))}|${pad(pumlEscape(d.program || '?'))}|${pad(pumlEscape(d.bindings || '-'))}|${pad(`${live}/${d.analysis.deadIds.size}`)}|`
-        );
-    }
+    // Only the columns some dispatch actually has (an inferred plan knows no program or bindings).
+    const cols = [['#', (d) => d.id], ['Dispatch', (d) => d.label || ''], ['Entry', (d) => d.entry]];
+    if (dispatches.some((d) => d.program)) cols.push(['Program', (d) => d.program || '-']);
+    if (dispatches.some((d) => d.bindings)) cols.push(['Bindings', (d) => d.bindings || '-']);
+    cols.push(['Nodes (live/dead)', (d) => `${d.analysis.nodeIds.length - d.analysis.deadIds.size}/${d.analysis.deadIds.size}`]);
+    lines.push(`  |${cols.map(([h]) => pad(h)).join('|')}|`);
+    for (const d of dispatches) lines.push(`  |${cols.map(([, f]) => pad(pumlEscape(String(f(d))))).join('|')}|`);
     // Provenance: everything outside the node boxes and their edges that came from the plan file.
     if (plan.auto) lines.push('  Dispatches inferred: one per [NodeIsProgramEntry] node; their order is host code and unknown here');
     else lines.push('  <i>From the dispatch plan file (not inferred): dispatch order, titles, programs, bindings, entry-record text,</i>\\n  <i>conditions, notes, pixel-shader lines, purple flows, hidden resources. Everything else is read from the DXIL.</i>');
@@ -186,6 +190,7 @@ function renderDispatchPlantUml(ir, plan, planAnalysis, opts, provenance = {}) {
     }
     lines.push('  Solid arrows = work-graph records inside one dispatch; resource access is read from the compiled DXIL');
     if (plan.diagram && plan.diagram.hideResourcesNote) lines.push(`  Hidden: ${pumlEscape(plan.diagram.hideResourcesNote)}`);
+    if (opts.hideGlobals && opts.hideGlobals.length) lines.push(`  Hidden by --hide-global: ${pumlEscape(opts.hideGlobals.join(', '))}`);
     const renamed = Object.entries(plan.programs || {}).filter(([, p]) => p.renamedCopies && p.renamedCopies.length);
     if (renamed.length) {
         lines.push('  Not drawn: per-program renamed mesh-node copies (entrypoints with no producer, never dispatched):');

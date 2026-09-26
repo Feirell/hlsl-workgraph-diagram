@@ -303,8 +303,8 @@ function buildLabel(n, grid, theme, globalsByName, opts) {
 
     const recordBlock = [
         n.globalAccess ? null : buildGlobalsUsedLines(n, globalsByName, theme, opts.globalListEnabled),
-        buildInputRecordLine(n, theme, opts.shortRecordInCount, opts.recordInNamesEnabled),
         buildGlobalsAccessLines(n, globalsByName, theme, opts, 'read'),
+        buildInputRecordLine(n, theme, opts.shortRecordInCount, opts.recordInNamesEnabled),
         buildGlobalsAccessLines(n, globalsByName, theme, opts, 'write'),
         buildBarrierLine(n, opts),
         buildOutputRecordsLines(n, theme, opts.shortRecordOutCount, opts.recordOutNamesEnabled),

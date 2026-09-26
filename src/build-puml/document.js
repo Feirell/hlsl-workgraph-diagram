@@ -205,32 +205,7 @@ function renderPlantUml(nodes, edges, externalIds, globals, opts, provenance = {
     lines.push('');
     lines.push('legend right');
 
-    // Global resource table - lists *every* discovered global regardless of
-    // whether any node reads it (the only place an unused global shows up
-    // at all). A field a generator couldn't fill (see docs/ir-format.md)
-    // renders as "?" rather than "undefined".
-    if (globals.length > 0) {
-        const allGlobalsSorted = [...globals].sort(
-            (a, b) => (a.space || 0) - (b.space || 0) || (a.regType || '').localeCompare(b.regType || '') || (a.regSlot || 0) - (b.regSlot || 0)
-        );
-        lines.push('  Global resources:');
-        lines.push(`  |${pad('Identifier')}|${pad('Slot')}|${pad('Kind')}|${pad('Value type')}|${pad('Used?')}|`);
-        for (const g of allGlobalsSorted) {
-            const used = globalUsedByGroups.get(g.name)?.size ? '✓' : '✗';
-            const kind = g.kind ? `${g.rw ? 'RW' : ''}${g.kind}` : g.resourceClass || '?';
-            // Space included when non-zero: with several register spaces, t0/u1 alone are ambiguous.
-            const slot = g.regType != null && g.regSlot != null ? `${g.regType}${g.regSlot}${g.space ? `, space${g.space}` : ''}` : '?';
-            const identCell = `<b><color:${theme.globalHighlight}>${pumlEscape(g.name)}</color></b>`;
-            lines.push(`  |${pad(identCell)}|${pad(slot)}|${pad(pumlEscape(kind))}|${pad(pumlEscape(g.valueType || '-'))}|${pad(used)}|`);
-        }
-        lines.push('  ');
-        lines.push('  Register slot prefixes:');
-        lines.push('  t<NR> := SRV (shader resource view) - read-only buffer/texture');
-        lines.push('  u<NR> := UAV (unordered access view) - read-write buffer/texture');
-        lines.push('  b<NR> := CBV (constant buffer view) - small constant-buffer data');
-        lines.push('  s<NR> := sampler state');
-        lines.push('  ');
-    }
+    lines.push(...renderGlobalTable(globals, globalUsedByGroups, theme));
 
     lines.push(`  |${pad('Color')}|${pad('Launch mode')}|`);
     lines.push(`  |${pad(`<${theme.broadcasting}>`)}|${pad('broadcasting')}|`);
@@ -258,6 +233,41 @@ function renderPlantUml(nodes, edges, externalIds, globals, opts, provenance = {
     return lines.join('\n');
 }
 
+// Legend table of every global resource (shared with dispatches.js). `usedBy` maps a global's name to a
+// non-empty collection when any node uses it.
+function renderGlobalTable(globals, usedBy, theme) {
+    const lines = [];
+    const pad = (s) => `  ${s}  `;
+    // Global resource table - lists *every* discovered global regardless of
+    // whether any node reads it (the only place an unused global shows up
+    // at all). A field a generator couldn't fill (see docs/ir-format.md)
+    // renders as "?" rather than "undefined".
+    if (globals.length > 0) {
+        const allGlobalsSorted = [...globals].sort(
+            (a, b) => (a.space || 0) - (b.space || 0) || (a.regType || '').localeCompare(b.regType || '') || (a.regSlot || 0) - (b.regSlot || 0)
+        );
+        lines.push('  Global resources:');
+        lines.push(`  |${pad('Identifier')}|${pad('Slot')}|${pad('Kind')}|${pad('Value type')}|${pad('Used?')}|`);
+        for (const g of allGlobalsSorted) {
+            const used = (usedBy.get(g.name)?.size || usedBy.get(g.name)?.length) ? '✓' : '✗';
+            const kind = g.kind ? `${g.rw ? 'RW' : ''}${g.kind}` : g.resourceClass || '?';
+            // Space included when non-zero: with several register spaces, t0/u1 alone are ambiguous.
+            const slot = g.regType != null && g.regSlot != null ? `${g.regType}${g.regSlot}${g.space ? `, space${g.space}` : ''}` : '?';
+            const identCell = `<b><color:${theme.globalHighlight}>${pumlEscape(g.name)}</color></b>`;
+            lines.push(`  |${pad(identCell)}|${pad(slot)}|${pad(pumlEscape(kind))}|${pad(pumlEscape(g.valueType || '-'))}|${pad(used)}|`);
+        }
+        lines.push('  ');
+        lines.push('  Register slot prefixes:');
+        lines.push('  t<NR> := SRV (shader resource view) - read-only buffer/texture');
+        lines.push('  u<NR> := UAV (unordered access view) - read-write buffer/texture');
+        lines.push('  b<NR> := CBV (constant buffer view) - small constant-buffer data');
+        lines.push('  s<NR> := sampler state');
+        lines.push('  ');
+    }
+
+    return lines;
+}
+
 function recordTypeSpanFor(recordType, theme) {
     const typeText = recordType ? `<<${recordType}>>` : '<<empty>>';
     return `<color:${theme.recordHighlight}>${typeText}</color>`;
@@ -280,4 +290,4 @@ function provenanceLines(theme, { packageVersion, generator, dxcVersion }) {
     return lines;
 }
 
-module.exports = { renderNodeBlock, renderPlantUml, renderPreamble, provenanceLines, recordTypeSpanFor };
+module.exports = { renderNodeBlock, renderPlantUml, renderPreamble, renderGlobalTable, provenanceLines, recordTypeSpanFor };

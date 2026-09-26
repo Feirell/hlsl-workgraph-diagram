@@ -398,21 +398,22 @@ function checkInventory(file, nodes, plan, report) {
         const planProgram = plan && Object.entries(plan.programs || {}).find(([, v]) => v.stateObjectName === p.name);
         const renamed = planProgram ? planProgram[1].renamedCopies || [] : [];
         const label = `program ${p.index} "${p.name}"${planProgram ? ` (${planProgram[0]})` : ''}`;
-        const expected = new Set([...irIds, ...renamed]);
-        const missing = [...expected].filter((id) => !p.nodes.includes(id));
-        const extra = p.nodes.filter((id) => !expected.has(id));
-        if (missing.length || extra.length) {
-            report('FAIL', 'inventory-nodes', `${label}: missing ${missing.join(', ') || '-'}; unexpected ${extra.join(', ') || '-'}`);
-        } else {
-            report('PASS', 'inventory-nodes', `${label}: ${p.nodes.length} runtime nodes = ${irIds.size} IR nodes + ${renamed.length} renamed copies`);
+        // Without a plan naming them, runtime-only nodes (host-side renames) cannot be predicted from the
+        // DXIL: report them, fail only on IR nodes/entries the runtime does not have.
+        const missing = [...irIds].filter((id) => !p.nodes.includes(id));
+        const extra = p.nodes.filter((id) => !irIds.has(id));
+        const unexplained = extra.filter((id) => !renamed.includes(id));
+        if (missing.length) report('FAIL', 'inventory-nodes', `${label}: IR nodes missing at runtime: ${missing.join(', ')}`);
+        else report('PASS', 'inventory-nodes', `${label}: all ${irIds.size} IR nodes present at runtime`);
+        if (extra.length) {
+            report(planProgram && !unexplained.length ? 'PASS' : 'INFO', 'inventory-nodes',
+                `${label}: ${extra.length} runtime-only node(s), not in the HLSL (created by the host): ${extra.join(', ')}${planProgram && !unexplained.length ? ' - as the plan declares' : ''}`);
         }
-        const expectedEntries = new Set([...irEntries, ...renamed]);
-        const eMissing = [...expectedEntries].filter((id) => !p.entrypoints.includes(id));
-        const eExtra = p.entrypoints.filter((id) => !expectedEntries.has(id));
-        report(eMissing.length || eExtra.length ? 'FAIL' : 'PASS', 'inventory-entrypoints',
-            eMissing.length || eExtra.length
-                ? `${label}: missing ${eMissing.join(', ') || '-'}; unexpected ${eExtra.join(', ') || '-'}`
-                : `${label}: entrypoints ${p.entrypoints.join(', ')}`);
+        const eMissing = irEntries.filter((id) => !p.entrypoints.includes(id));
+        const eExtra = p.entrypoints.filter((id) => !irEntries.includes(id));
+        if (eMissing.length) report('FAIL', 'inventory-entrypoints', `${label}: IR entries missing at runtime: ${eMissing.join(', ')}`);
+        else report('PASS', 'inventory-entrypoints', `${label}: all IR entries are runtime entrypoints (${irEntries.join(', ')})`);
+        if (eExtra.length) report('INFO', 'inventory-entrypoints', `${label}: runtime-only entrypoints: ${eExtra.join(', ')}`);
         if (plan && planProgram) {
             for (const d of plan.dispatches.filter((x) => x.program === planProgram[0])) {
                 report(p.entrypoints.includes(d.entry) ? 'PASS' : 'FAIL', 'inventory-dispatch', `${d.id}: entry ${d.entry} ${p.entrypoints.includes(d.entry) ? 'is' : 'is NOT'} an entrypoint of ${label}`);

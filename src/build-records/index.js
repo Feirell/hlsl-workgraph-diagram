@@ -117,7 +117,12 @@ function rowsOf(typeName, t, annotations) {
 }
 
 const typeText = (f) => `${f.type}${(f.arrayDims || []).map((d) => `[${d}]`).join('')}`;
-const hex = (n) => `+${n}`.padEnd(5, ' ');
+// Row prefix: size then offset, both plain byte counts, right-aligned (monospaced font).
+const COL = { size: 5, offset: 7, type: 14 };
+// Padding uses NO-BREAK SPACE: PlantUML strips leading ASCII spaces from a member line, which would
+// left-align the numbers of every row not wrapped in a <back> highlight.
+const NBSP = '\u00A0';
+const sizeOffset = (size, offset) => `${String(size).padStart(COL.size, NBSP)}${String(offset).padStart(COL.offset, NBSP)}${NBSP}${NBSP}`;
 const clip = (s, n) => (s && s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 function flagsOf(t) {
@@ -185,6 +190,7 @@ function renderClass(types, opts) {
             L.push(`  class ${t.name} <<${t.role}>> {`);
             L.push(`    {field} <size:10><color:#5D6D7E>${pumlEscape(extra.join(' · '))}</color></size>`);
             L.push('    ==');
+            L.push(`    {field} <color:#7F8C8D>${'size'.padStart(COL.size, NBSP)}${'offset'.padStart(COL.offset, NBSP)}${NBSP}${NBSP}${'type'.padEnd(COL.type, NBSP)}${NBSP}name</color>`);
             for (const r of t.rows) for (const line of classRow(r, opts)) L.push(`    {field} ${line}`);
             const usage = usageLines(t);
             if (usage.length) {
@@ -215,8 +221,9 @@ function renderClass(types, opts) {
         }
     }
     L.push('', 'legend right');
-    for (const [, k] of Object.entries(KINDS)) L.push(`  <back:${k.back}><color:${k.colour}><b>  field  </b></color></back> ${pumlEscape(k.label)}`);
-    L.push('  offsets in bytes; layout from DXIL debug info (-Zi), SV_DispatchGrid from DXIL node metadata;',
+    const used = new Set(types.flatMap((t) => t.rows.map((r) => r.kind)));
+    for (const [, k] of Object.entries(KINDS).filter(([name]) => used.has(name))) L.push(`  <back:${k.back}><color:${k.colour}><b>  field  </b></color></back> ${pumlEscape(k.label)}`);
+    L.push('  columns: size and offset in bytes, type, name; layout from DXIL debug info (-Zi), SV_DispatchGrid from DXIL node metadata;',
         '  (DXIL) = inferred from the compiled shaders, (annotation) = supplied by an --annotations file', 'endlegend', '@enduml');
     return L.join('\n');
 }
@@ -224,13 +231,13 @@ function renderClass(types, opts) {
 // One line for the field itself, then one indented line each for what is known about it and its
 // source comment, so a long note makes a box taller rather than the whole diagram wider.
 function classRow(r, opts) {
-    if (r.padding) return [`<back:${KINDS.padding.back}><color:${KINDS.padding.colour}><i>${hex(r.offsetBytes)}  (${r.sizeBytes} B padding)</i></color></back>`];
-    let body = `${hex(r.offsetBytes)}  ${pumlEscape(typeText(r)).padEnd(14, ' ')} ${pumlEscape(r.name)}`;
+    if (r.padding) return [`<back:${KINDS.padding.back}><color:${KINDS.padding.colour}><i>${sizeOffset(r.sizeBytes, r.offsetBytes)}(padding)</i></color></back>`];
+    let body = `${sizeOffset(r.sizeBytes, r.offsetBytes)}${pumlEscape(typeText(r)).padEnd(COL.type, NBSP)}${NBSP}${pumlEscape(r.name)}`;
     const k = r.kind ? KINDS[r.kind] : null;
     if (k) body = `<back:${k.back}><color:${k.colour}><b>${body}</b></color></back>`;
     const lines = [body];
     const note = annotationText(r);
-    const indent = '<color:#FFFFFF>.</color>      ';
+    const indent = NBSP.repeat(COL.size + COL.offset + 2);
     if (note) lines.push(`${indent}<size:9><color:${k ? k.colour : '#5D6D7E'}>${pumlEscape(note)}</color></size>`);
     if (opts.comments && r.comment) lines.push(`${indent}<color:#95A5A6><size:9>// ${pumlEscape(clip(r.comment, 80))}</size></color>`);
     return lines;
@@ -260,8 +267,8 @@ function renderYaml(types, opts) {
             const typeKey = yamlKey(`${t.name} (${[`${t.sizeBytes} B`, ...flagsOf(t)].join(', ')})`);
             body.push(`  ${typeKey}:`);
             for (const r of t.rows) {
-                const key = r.padding ? yamlKey(`+${r.offsetBytes} padding`) : yamlKey(`+${r.offsetBytes} ${r.name}`);
-                let value = r.padding ? `${r.sizeBytes} B` : typeText(r);
+                const key = r.padding ? yamlKey(`padding at ${r.offsetBytes}`) : yamlKey(r.name);
+                let value = r.padding ? `size ${r.sizeBytes} B` : `size ${r.sizeBytes} B, offset ${r.offsetBytes}, ${typeText(r)}`;
                 const note = annotationText(r);
                 if (note) value += `  ${note}`;
                 if (opts.comments && r.comment && !r.padding) value += `  // ${clip(r.comment, 60)}`;

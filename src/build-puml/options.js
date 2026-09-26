@@ -30,6 +30,7 @@ const SPECS = [
     { name: 'recordOutNamesEnabled', flag: '--record-out-names', negFlag: '--no-record-out-names', type: 'boolean', default: false },
     { name: 'nodeComments', flag: '--node-comments', negFlag: '--no-node-comments', type: 'boolean', default: true },
     { name: 'dispatches', flag: '--dispatches', type: 'string', default: null },
+    { name: 'hideGlobal', flag: '--hide-global', type: 'string', default: null, repeatable: true },
     { name: 'globalFields', flag: '--global-fields', negFlag: '--no-global-fields', type: 'boolean', default: false },
     { name: 'edgeRecordSize', flag: '--edge-record-size', negFlag: '--no-edge-record-size', type: 'boolean', default: false },
     VERBOSE_SPEC,
