@@ -133,6 +133,7 @@ function checkRecordTypes(ir, annotations, report) {
     if (!annotations) return;
     const globals = new Set((ir.globals || []).map((g) => g.name));
     for (const [key, a] of Object.entries(annotations)) {
+        if (key.startsWith('_')) continue; // comment keys
         const [type, field] = key.split('.');
         const t = ir.recordTypes[type];
         if (!t || !t.fields.some((f) => f.name === field)) report('FAIL', 'record-annotation', `${key}: no such record field`);
