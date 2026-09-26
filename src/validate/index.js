@@ -232,28 +232,31 @@ function checkNodeLimits(nodes, report) {
 }
 
 function checkPlan(plan, ir, report) {
-    const analysis = analysePlan(plan, ir.nodes || []);
+    const analysis = analysePlan(plan, ir.nodes || [], ir.recordTypes);
     const { nodesById, dispatches } = analysis;
     const globalsByName = new Map((ir.globals || []).map((g) => [g.name, g]));
+    for (const d of plan.dispatches) for (const g of (d.irData && d.irData.globals) || []) if (!globalsByName.has(g.name)) globalsByName.set(g.name, g);
 
     for (const d of dispatches) {
-        const entry = nodesById.get(d.entry);
+        const entry = d.nodesById.get(d.entry);
         if (!entry) report('FAIL', 'dispatch-entry', `${d.id}: entry ${d.entry} is not a node`);
         else if (!entry.isEntry) report('FAIL', 'dispatch-entry', `${d.id}: entry ${d.entry} lacks [NodeIsProgramEntry]`);
         else report('PASS', 'dispatch-entry', `${d.id}: ${d.entry} is a program entry`);
         const maxDepth = Math.max(...d.analysis.depth.values());
         report(maxDepth < MAX_DEPTH ? 'PASS' : 'FAIL', 'graph-depth', `${d.id}: longest chain ${maxDepth + 1} node(s) (limit ${MAX_DEPTH})`);
         report('INFO', 'dispatch-nodes', `${d.id}: ${[...d.analysis.liveIds].sort().join(', ')}${d.analysis.deadIds.size ? `; never launched: ${[...d.analysis.deadIds].sort().join(', ')}` : ''}`);
+        if (d.entryRecord && typeof d.entryRecord === 'object') checkEntryRecord(d, entry, ir, report);
     }
 
     // Every graph entry must be dispatched by the plan, and every node reached by some dispatch.
     const planned = new Set(plan.dispatches.map((d) => d.entry));
-    for (const n of ir.nodes) {
+    const allNodes = [...nodesById.values()];
+    for (const n of allNodes) {
         if (n.isEntry && !planned.has(n.id)) report('WARN', 'undispatched-entry', `${n.id}: program entry that no dispatch in the plan starts at`);
     }
     const reached = new Set(dispatches.flatMap((d) => d.analysis.nodeIds));
-    const unreached = ir.nodes.filter((n) => !reached.has(n.id)).map((n) => n.id);
-    report(unreached.length ? 'FAIL' : 'PASS', 'reachability', unreached.length ? `never part of any dispatch: ${unreached.join(', ')}` : `all ${ir.nodes.length} nodes are part of some dispatch`);
+    const unreached = allNodes.filter((n) => !reached.has(n.id)).map((n) => n.id);
+    report(unreached.length ? 'FAIL' : 'PASS', 'reachability', unreached.length ? `never part of any dispatch: ${unreached.join(', ')}` : `all ${allNodes.length} nodes are part of some dispatch`);
 
     // Dispatches with different entries should not share nodes: a shared node runs in both.
     for (let i = 0; i < dispatches.length; i++) {
@@ -272,8 +275,27 @@ function checkPlan(plan, ir, report) {
             checkUavFlow(plan, dispatches, globalsByName, report);
             checkAttachmentFlows(plan, dispatches, report);
         }
-        checkRules(plan, dispatches, nodesById, globalsByName, report);
+        checkRules(plan, dispatches, globalsByName, report);
     }
+}
+
+// An entry record pinned by a dispatch definition must match the entry node's input record layout.
+function checkEntryRecord(d, entry, ir, report) {
+    const input = entry && entry.inputs[0];
+    if (!input || !input.recordType) {
+        report('FAIL', 'entry-record', `${d.id}: ${d.entry} takes no input record, but the dispatch sets ${Object.keys(d.entryRecord).join(', ')}`);
+        return;
+    }
+    const types = (d.irData && d.irData.recordTypes) || ir.recordTypes || {};
+    const t = types[input.recordType];
+    for (const [f, v] of Object.entries(d.entryRecord)) {
+        const field = t && t.fields.find((x) => x.name === f);
+        if (!field) report('FAIL', 'entry-record', `${d.id}: ${input.recordType} has no field "${f}"`);
+        else if (typeof v !== 'number' && !Array.isArray(v)) report('FAIL', 'entry-record', `${d.id}: ${input.recordType}.${f} = ${JSON.stringify(v)} is not a number`);
+        else report('PASS', 'entry-record', `${d.id}: ${input.recordType}.${f} (${field.type}, offset ${field.offsetBytes}) = ${JSON.stringify(v)}`);
+    }
+    const unset = t ? t.fields.filter((x) => !(x.name in d.entryRecord) && !x.semantic).map((x) => x.name) : [];
+    if (unset.length) report('INFO', 'entry-record', `${d.id}: ${input.recordType} fields not set by the definition: ${unset.join(', ')}`);
 }
 
 // Within a frame, dispatches are ordered and separated by a global UAV barrier.
@@ -354,13 +376,13 @@ function checkAttachmentFlows(plan, dispatches, report) {
     }
 }
 
-function checkRules(plan, dispatches, nodesById, globalsByName, report) {
+function checkRules(plan, dispatches, globalsByName, report) {
     for (const rule of plan.rules || []) {
         const violations = [];
         for (const d of dispatches) {
             if (rule.dispatches && !rule.dispatches.includes(d.id)) continue;
             for (const id of d.analysis.liveIds) {
-                const n = nodesById.get(id);
+                const n = d.nodesById.get(id);
                 if (rule.launchModes && !rule.launchModes.includes(n.launchMode)) continue;
                 for (const [res, label] of Object.entries(n.globalAccess || {})) {
                     const g = globalsByName.get(res);

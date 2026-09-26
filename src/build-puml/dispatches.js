@@ -21,6 +21,22 @@ const { launchStereotype, classifyGrid, buildLabel, edgeRecordCountBraces } = re
 const { globalBoxLabel, sanitizeAlias } = require('./global-boxes');
 const { renderPreamble, renderGlobalTable, provenanceLines, recordTypeSpanFor } = require('./document');
 
+const entryRecordText = (r) => (typeof r === 'object' ? Object.entries(r).map(([k, v]) => `${k} = ${v}`).join(', ') : String(r));
+
+// What each pinned entry-record field reaches in this dispatch (from the DXIL dataflow).
+function impactLines(d) {
+    const imp = d.entryRecordImpact;
+    if (!imp) return [];
+    return Object.entries(imp.fields).map(([f, x]) => {
+        const parts = [];
+        if (x.controls.length) parts.push(`branches in ${x.controls.join(', ')}`);
+        if (x.counts.length) parts.push(`counts of ${x.counts.join(', ')}`);
+        if (x.indexes.length) parts.push(`indexes ${x.indexes.join(', ')}`);
+        if (x.copiedTo.length) parts.push(`copied to ${x.copiedTo.join(', ')}`);
+        return `<size:9><i>${pumlEscape(f)} → ${pumlEscape(parts.join('; ') || 'no effect found')}</i></size>`;
+    });
+}
+
 const nodeAlias = (dispatchId, id) => `${sanitizeAlias(dispatchId)}__${sanitizeAlias(id)}`;
 const resourceAlias = (name) => `res_${sanitizeAlias(name)}`;
 
@@ -59,9 +75,11 @@ function renderDispatchPlantUml(ir, plan, planAnalysis, opts, provenance = {}) {
         const program = (plan.programs && plan.programs[d.program]) || {};
         const pixelShaders = program.meshNodePixelShaders || {};
         const title = [
-            `<b>${pumlEscape(d.id)} · ${pumlEscape(d.label || d.entry)}</b>`,
+            `<b>${pumlEscape(d.id)}${d.label && d.label !== d.id ? ` · ${pumlEscape(d.label)}` : ''}</b>`,
             `<size:10>${[`entry ${pumlEscape(d.entry)}`, d.program ? `program ${pumlEscape(d.program)}` : null, d.bindings ? pumlEscape(d.bindings) : null].filter(Boolean).join(' · ')}</size>`,
-            d.entryRecord ? `<size:10>entry record: ${pumlEscape(d.entryRecord)}</size>` : null,
+            d.entryRecord ? `<size:10>entry record: ${pumlEscape(entryRecordText(d.entryRecord))}</size>` : null,
+            d.defines && d.defines.length ? `<size:10>defines: ${pumlEscape(d.defines.join(' '))}</size>` : null,
+            ...impactLines(d),
             d.conditional ? `<size:10><i>${pumlEscape(d.conditional)}</i></size>` : null,
             d.note ? `<size:10>${pumlEscape(d.note)}</size>` : null,
         ]
@@ -69,15 +87,14 @@ function renderDispatchPlantUml(ir, plan, planAnalysis, opts, provenance = {}) {
             .join('\\n');
         lines.push(`package "${title}" as D_${sanitizeAlias(d.id)} {`);
         for (const id of d.analysis.nodeIds.sort()) {
-            const n = nodesById.get(id);
+            const n = d.nodesById.get(id);
             // Resources drawn as boxes are shown by their edges; keep only the rest (SRVs) in the body.
             const view = {
                 ...n,
                 depth: d.analysis.depth.get(id),
-                globalsUsed: (n.globalsUsed || []).filter((g) => !boxedNames.has(g) && !hidden.has(g)),
-                globalAccess: n.globalAccess
-                    ? Object.fromEntries(Object.entries(n.globalAccess).filter(([g]) => !boxedNames.has(g) && !hidden.has(g)))
-                    : undefined,
+                // Boxed UAVs stay in the body lists too: the box edges show the flow, the list what the node declares.
+                globalsUsed: (n.globalsUsed || []).filter((g) => !hidden.has(g)),
+                globalAccess: n.globalAccess ? Object.fromEntries(Object.entries(n.globalAccess).filter(([g]) => !hidden.has(g))) : undefined,
             };
             let label = buildLabel(view, classifyGrid(view, opts.shortGridThreadsCount), theme, globalsByName, opts);
             if (n.launchMode === 'mesh' && Object.prototype.hasOwnProperty.call(pixelShaders, id)) {
@@ -167,7 +184,7 @@ function renderDispatchPlantUml(ir, plan, planAnalysis, opts, provenance = {}) {
     lines.push('legend right');
     // Same global resource table as the single-graph view; "used" = used by a node of some dispatch.
     const usedBy = new Map();
-    for (const d of dispatches) for (const id of d.analysis.nodeIds) for (const g of nodesById.get(id).globalsUsed || []) usedBy.set(g, [...(usedBy.get(g) || []), id]);
+    for (const d of dispatches) for (const id of d.analysis.nodeIds) for (const g of d.nodesById.get(id).globalsUsed || []) usedBy.set(g, [...(usedBy.get(g) || []), id]);
     lines.push(...renderGlobalTable(globals, usedBy, theme));
     lines.push(`  <b>${pumlEscape(plan.title || 'Dispatch sequence')}</b>`);
     // Only the columns some dispatch actually has (an inferred plan knows no program or bindings).
@@ -179,7 +196,17 @@ function renderDispatchPlantUml(ir, plan, planAnalysis, opts, provenance = {}) {
     for (const d of dispatches) lines.push(`  |${cols.map(([, f]) => pad(pumlEscape(String(f(d))))).join('|')}|`);
     // Provenance: everything outside the node boxes and their edges that came from the plan file.
     if (plan.auto) lines.push('  Dispatches inferred: one per [NodeIsProgramEntry] node; their order is host code and unknown here');
-    else lines.push('  <i>From the dispatch plan file (not inferred): dispatch order, titles, programs, bindings, entry-record text,</i>\\n  <i>conditions, notes, pixel-shader lines, purple flows, hidden resources. Everything else is read from the DXIL.</i>');
+    else {
+        // Name exactly the plan fields this frame used; everything else in the diagram is read from the DXIL.
+        const has = (k) => dispatches.some((d) => d[k] != null && !(Array.isArray(d[k]) && !d[k].length));
+        const supplied = ['dispatch order', 'entry nodes'];
+        for (const [k, label] of [['entryRecord', 'entry-record values'], ['defines', 'defines'], ['program', 'programs'], ['bindings', 'bindings'],
+            ['conditional', 'conditions'], ['note', 'notes']]) if (has(k)) supplied.push(label);
+        if (plan.programs) supplied.push('pixel-shader lines');
+        if ((plan.attachmentFlows || []).length) supplied.push('purple flows');
+        if (plan.diagram && plan.diagram.hideResources) supplied.push('hidden resources');
+        lines.push(`  <i>From the dispatch definitions (not inferred): ${pumlEscape(supplied.join(', '))}. Everything else is read from the DXIL.</i>`);
+    }
     if (plan.betweenDispatches) lines.push(`  Between dispatches: ${pumlEscape(plan.betweenDispatches)}`);
     if (plan.frameStart && plan.frameStart.note) lines.push(`  Frame start: ${pumlEscape(plan.frameStart.note)}`);
     lines.push('  ');

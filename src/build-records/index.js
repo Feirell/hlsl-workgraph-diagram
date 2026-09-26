@@ -57,6 +57,8 @@ Options:
                              "note": "...", "target": "<buffer>",
                              "evidence": "file:line" } }
   --comments / --no-comments Show each field's source comment. Default: on.
+  --line-type <spline|ortho|polyline>
+                             Class style edge routing. Default: spline.
   --columns <n>              Class style: boxes per row within a group. Default: 4.
   --help, -h, -?             Show this help text and exit.
 `);
@@ -69,6 +71,7 @@ function run(argv) {
         { name: 'annotations', flag: '--annotations', type: 'string', default: null },
         { name: 'comments', flag: '--comments', negFlag: '--no-comments', type: 'boolean', default: true },
         { name: 'columns', flag: '--columns', type: 'string', default: '4' },
+        { name: 'lineType', flag: '--line-type', type: 'string', default: 'spline' },
     ]);
     if (help) {
         printHelp();
@@ -84,7 +87,7 @@ function run(argv) {
     const types = Object.entries(ir.recordTypes)
         .map(([name, t]) => ({ name, ...t, role: ROLE_ORDER.find((r) => t.roles.includes(r)), rows: rowsOf(name, t, annotations) }))
         .filter((t) => roles.includes(t.role));
-    const opts = { comments: values.comments, columns: Math.max(1, Number(values.columns) || 4) };
+    const opts = { comments: values.comments, columns: Math.max(1, Number(values.columns) || 4), lineType: values.lineType };
     const puml = values.style === 'yaml' ? renderYaml(types, opts) : renderClass(types, opts);
     fs.writeFileSync(outFile, puml, 'utf8');
     console.log(`Wrote ${outFile} (${types.length} record type(s), style ${values.style}).`);
@@ -179,7 +182,9 @@ function renderClass(types, opts) {
         'skinparam class {', '  BackgroundColor #FFFFFF', '  BorderColor #5D6D7E',
         '  BackgroundColor<<cpu-entry-record>> #E8F8F5', '  BackgroundColor<<node-record>> #EBF5FB',
         '  BackgroundColor<<buffer-element>> #FEF9E7', '  BackgroundColor<<nested>> #F4F6F6', '}',
-        'skinparam packageStyle rectangle', ''];
+        'skinparam packageStyle rectangle'];
+    if (opts.lineType && opts.lineType !== 'spline') L.push(`skinparam linetype ${opts.lineType}`);
+    L.push('');
     for (const role of ROLE_ORDER) {
         const group = types.filter((t) => t.role === role);
         if (!group.length) continue;

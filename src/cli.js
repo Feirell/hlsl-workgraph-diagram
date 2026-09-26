@@ -34,9 +34,10 @@ const COMMANDS = {
     'puml-render': () => require('./puml-render'),
     validate: () => require('./validate'),
     'build-records': () => require('./build-records'),
+    pipeline: () => require('./pipeline'),
 };
 
-const COMMAND_ORDER = ['setup-dxil', 'parse-source', 'parse-dxil', 'build-puml', 'puml-render', 'validate', 'build-records'];
+const COMMAND_ORDER = ['setup-dxil', 'parse-source', 'parse-dxil', 'build-puml', 'puml-render', 'validate', 'build-records', 'pipeline'];
 
 const SUMMARIES = {
     'setup-dxil': 'Download and cache a dxc build for parse-dxil to use.',
@@ -44,6 +45,7 @@ const SUMMARIES = {
     'parse-dxil': 'Compile HLSL with dxc and read the shared IR JSON back out of the DXIL metadata.',
     'build-puml': 'Render the IR JSON as a PlantUML (.puml) diagram.',
     'puml-render': 'Render a .puml file to .png/.svg via a PlantUML server.',
+    pipeline: 'Run everything over a list of dispatch definitions (entry, entry record, #defines).',
     'build-records': 'Render the record struct layouts (parse-dxil IR) as a PlantUML class or YAML diagram.',
     validate: 'Check an IR against the spec node limits, and a dispatch plan for reachability and UAV hazards.',
 };

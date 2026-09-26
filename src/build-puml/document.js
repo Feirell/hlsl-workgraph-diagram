@@ -50,6 +50,8 @@ function renderNodeBlock(n, indentLevel, theme, globalsByName, opts) {
 function renderPreamble(theme, opts) {
     const lines = [];
     lines.push('hide empty description');
+    // ortho = right angles, polyline = straight segments; spline (Graphviz default) = curves.
+    if (opts.lineType && opts.lineType !== 'spline') lines.push(`skinparam linetype ${opts.lineType}`);
     if (theme.canvasBg) lines.push(`skinparam BackgroundColor ${theme.canvasBg}`);
     lines.push(`skinparam DefaultFontColor ${theme.fontColor}`);
     lines.push(`skinparam ArrowColor ${theme.arrowColor}`);

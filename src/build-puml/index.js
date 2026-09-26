@@ -81,6 +81,9 @@ Options:
   --node-comments / --no-node-comments
                                    Show each node's leading source comment
                                    in its box. Default: on.
+  --line-type <spline|ortho|polyline>
+                                   Edge routing: curves (default), right
+                                   angles, or straight segments.
   --hide-global <name>             Dispatch view: leave this resource out of
                                    the UAV boxes and node lists (display
                                    only; noted in the legend). Repeatable.
@@ -173,7 +176,7 @@ function run(argv) {
     let puml;
     if (opts.dispatches) {
         const plan = loadPlan(opts.dispatches === 'auto' ? 'auto' : path.resolve(opts.dispatches), nodes);
-        const analysis = analysePlan(plan, nodes);
+        const analysis = analysePlan(plan, nodes, ir.recordTypes);
         for (const d of analysis.dispatches) {
             log.info(`dispatch ${d.id} (${d.entry}): ${d.analysis.nodeIds.length} node(s), ${d.analysis.deadIds.size} never launched.`);
         }

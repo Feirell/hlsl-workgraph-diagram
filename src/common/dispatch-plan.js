@@ -17,6 +17,8 @@
 // ---------------------------------------------------------------------------
 
 const fs = require('fs');
+const path = require('path');
+const { readIrFile } = require('./ir');
 
 // "auto": a plan inferred from the graph alone - one dispatch per [NodeIsProgramEntry] node. The
 // dispatch ORDER is host code, so it is unknown here and order-dependent checks are skipped.
@@ -37,6 +39,8 @@ function loadPlan(file, nodes) {
     }
     for (const d of plan.dispatches) {
         if (!d.id || !d.entry) throw new Error(`${file}: every dispatch needs "id" and "entry"`);
+        // A dispatch compiled with its own #defines brings its own IR (relative to the plan file).
+        if (d.ir) d.irData = readIrFile(path.resolve(path.dirname(file), d.ir));
     }
     return plan;
 }
@@ -127,14 +131,54 @@ function dispatchAccess(analysis, nodesById) {
     return acc;
 }
 
-function analysePlan(plan, nodes) {
+function analysePlan(plan, nodes, recordTypes) {
     const nodesById = new Map(nodes.map((n) => [n.id, n]));
-    const edges = buildEdges(nodes);
     const dispatches = plan.dispatches.map((d) => {
-        const analysis = analyseDispatch(d.entry, nodesById, edges);
-        return { ...d, analysis, access: dispatchAccess(analysis, nodesById) };
+        const dNodes = d.irData ? d.irData.nodes : nodes;
+        const dById = new Map(dNodes.map((n) => [n.id, n]));
+        for (const n of dNodes) if (!nodesById.has(n.id)) nodesById.set(n.id, n);
+        const dEdges = buildEdges(dNodes);
+        const analysis = analyseDispatch(d.entry, dById, dEdges);
+        const types = (d.irData && d.irData.recordTypes) || recordTypes || {};
+        return { ...d, nodesById: dById, edges: dEdges, analysis, access: dispatchAccess(analysis, dById), entryRecordImpact: entryRecordImpact(d, dById, types) };
     });
-    return { nodesById, edges, dispatches };
+    return { nodesById, edges: buildEdges(nodes), dispatches };
 }
 
-module.exports = { autoPlan, loadPlan, buildEdges, analyseDispatch, dispatchAccess, analysePlan };
+// For every pinned entry-record field: what it influences inside the dispatch, following its value
+// through the record fields it is copied into (DXIL dataflow; no constant folding of the value).
+function entryRecordImpact(d, nodesById, types) {
+    if (!d.entryRecord || typeof d.entryRecord !== 'object') return null;
+    const entry = nodesById.get(d.entry);
+    const typeName = entry && entry.inputs[0] && entry.inputs[0].recordType;
+    const out = {};
+    for (const field of Object.keys(d.entryRecord)) {
+        const impact = { controls: new Set(), counts: new Set(), indexes: new Set(), copiedTo: new Set() };
+        const seen = new Set();
+        const queue = [`${typeName}.${field}`];
+        while (queue.length) {
+            const key = queue.shift();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const [t, f] = key.split('.');
+            const x = types[t] && types[t].fields.find((y) => y.name === f);
+            const df = x && x.dataflow;
+            if (!df) continue;
+            for (const n of df.controls || []) impact.controls.add(n);
+            for (const s of df.sizesOutputs || []) impact.counts.add(`${s.node}->${s.output}`);
+            for (const i of df.indexes || []) impact.indexes.add(i.resource);
+            for (const to of df.flowsTo || []) { impact.copiedTo.add(to); queue.push(to); }
+        }
+        // Only what lies inside this dispatch's node set.
+        const inside = (n) => nodesById.has(n.split('->')[0]);
+        out[field] = {
+            controls: [...impact.controls].filter(inside).sort(),
+            counts: [...impact.counts].filter(inside).sort(),
+            indexes: [...impact.indexes].sort(),
+            copiedTo: [...impact.copiedTo].sort(),
+        };
+    }
+    return { recordType: typeName, fields: out };
+}
+
+module.exports = { entryRecordImpact, autoPlan, loadPlan, buildEdges, analyseDispatch, dispatchAccess, analysePlan };

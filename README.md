@@ -176,6 +176,14 @@ filesystem or network. `--verbose`/`-v` - print per-file/per-node/per-global/per
 and the exact system commands issued (`dxc` invocations, HTTP requests, PNG/SVG writes), instead of just
 the terse summary counts.
 
+## Pipeline: dispatch definitions
+
+`hlsl-workgraph-diagram pipeline <config.json> [outDir] [--jar plantuml.jar]` compiles the graph, cuts one
+subgraph per dispatch definition (entry node, entry-record values, `#define`s), and writes per dispatch an IR, a
+graph diagram and a record-layout diagram, plus a frame diagram in the declared order and one validation report.
+See [`docs/pipeline.md`](docs/pipeline.md). `puml-render --jar <plantuml.jar>` renders locally instead of via a
+server; `--line-type ortho` (build-puml, build-records) routes edges at right angles.
+
 ## What is inferred, and what can be supplied
 
 Everything `parse-dxil` writes is read from the compiled DXIL (plus the source text dxc embeds with `-Zi`); no
