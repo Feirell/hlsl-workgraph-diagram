@@ -2,6 +2,12 @@
 
 # Dispatch plans (`build-puml --dispatches`, `validate --dispatches`)
 
+> For most uses, write a `pipeline` config instead ([`pipeline.md`](pipeline.md)): it covers order, entries, entry
+> records and per-dispatch defines, compiles for you, and writes a plan like this one (`frame.plan.json`). A
+> hand-written plan is for what the pipeline does not model - programs, bindings, render-target flows, rules -
+> and `--dispatches auto` needs no file at all (one dispatch per `[NodeIsProgramEntry]` node, order unknown, so
+> order-dependent checks are skipped).
+
 A work graph with several entrypoints is usually dispatched more than once per frame, each `DispatchGraph`
 starting at a different entry (or the same entry under a different program), with data handed from one
 dispatch to the next through UAVs. None of that is in the HLSL: the order, the program and the bindings are
@@ -35,6 +41,12 @@ use them.
 ```
 
 Only `dispatches[].id` and `dispatches[].entry` are required; everything else is optional.
+
+- **`dispatches[].entryRecord`**: an object (`{ "field": value }`) is checked against the entry's record layout and
+  its dataflow impact is shown (see `pipeline.md`); a string is shown as-is.
+- **`dispatches[].defines`**: shown in the dispatch title.
+- **`dispatches[].ir`**: an IR file (relative to the plan) for this dispatch, e.g. one compiled with its own defines.
+  Without it, the dispatch uses the IR given on the command line.
 
 - **`programs.<name>.meshNodePixelShaders`**: `null` means depth-only (no pixel shader). Shown in each mesh
   node's box.

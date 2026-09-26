@@ -1,0 +1,1368 @@
+{
+  "irVersion": 1,
+  "generator": "parse-dxil",
+  "generatorDetail": {
+    "entryFile": "src/WorkGraph.hlsl",
+    "defines": [],
+    "profile": "lib_6_8",
+    "extraArgs": [],
+    "dxcExe": "/opt/dxc/bin/dxc",
+    "dxcVersion": "libdxcompiler.so: 1.9(dev;4480-cfc8ba0c)"
+  },
+  "nodes": [
+    {
+      "id": "DrawEntryNode",
+      "nodeIdIndex": 0,
+      "functionName": "DrawEntryNode",
+      "group": null,
+      "sourceFile": "src/WorkGraph.hlsl",
+      "sourceLine": 56,
+      "comment": null,
+      "isEntry": true,
+      "launchMode": "broadcasting",
+      "numThreads": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "maxDispatchGrid": null,
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [
+        {
+          "recordKind": "DispatchNodeInputRecord",
+          "recordType": "DrawEntryRecord",
+          "varName": "entry",
+          "linkedNodeID": null,
+          "maxRecords": null,
+          "ioFlags": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "dispatch",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": null,
+          "recordSizeBytes": 4,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "pass",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "recordKind": "NodeOutput",
+          "recordType": "FanOutRecord",
+          "varName": "fanOutput",
+          "linkedNodeID": {
+            "name": "FanOutNode",
+            "index": 0
+          },
+          "maxRecords": {
+            "resolved": 1,
+            "source": null
+          },
+          "allocation": {
+            "constCounts": [],
+            "dynamicCount": 1
+          },
+          "ioFlags": {
+            "input": false,
+            "output": true,
+            "readWrite": true,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": null,
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": {
+            "offsetBytes": 0,
+            "componentType": "uint32",
+            "count": 3
+          },
+          "recordSizeBytes": 20,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "DispatchGrid",
+              "sizeBits": 96
+            },
+            {
+              "name": "count",
+              "sizeBits": 32
+            },
+            {
+              "name": "pass",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "meshOutputs": [],
+      "globalsUsed": [
+        "counters"
+      ],
+      "groupSharedBytes": 0,
+      "globalAccess": {
+        "counters": "read"
+      },
+      "dataflow": {
+        "inputFieldsRead": {
+          "DrawEntryRecord": [
+            "pass"
+          ]
+        },
+        "outputFieldsWritten": {
+          "0": {
+            "target": "FanOutNode",
+            "recordType": "FanOutRecord",
+            "fields": {
+              "DispatchGrid.x": [
+                "buf:counters[0]"
+              ],
+              "DispatchGrid.y": [
+                "const:1"
+              ],
+              "DispatchGrid.z": [
+                "const:1"
+              ],
+              "count": [
+                "buf:counters[0]"
+              ],
+              "pass": [
+                "in:DrawEntryRecord.pass"
+              ]
+            }
+          }
+        },
+        "outputAllocationSources": {
+          "0": [
+            "buf:counters[0]"
+          ]
+        },
+        "outputAllocationKinds": {
+          "0": [
+            "per-group x(dynamic)"
+          ]
+        },
+        "controlSources": [
+          "buf:counters[0]"
+        ],
+        "barriers": [],
+        "resources": {
+          "counters": {
+            "access": [
+              "read"
+            ],
+            "fields": {
+              "[0]": [
+                "read"
+              ]
+            },
+            "constIndices": {
+              "0": [
+                "read"
+              ]
+            },
+            "indexedBy": {},
+            "valuesFrom": [],
+            "atomicOps": []
+          }
+        }
+      }
+    },
+    {
+      "id": "EmitNode",
+      "nodeIdIndex": 0,
+      "functionName": "EmitNode",
+      "group": null,
+      "sourceFile": "src/WorkGraph.hlsl",
+      "sourceLine": 28,
+      "comment": null,
+      "isEntry": true,
+      "launchMode": "broadcasting",
+      "numThreads": {
+        "resolved": [
+          64,
+          1,
+          1
+        ],
+        "source": [
+          "EMIT_THREADS",
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": {
+        "resolved": [
+          4,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "maxDispatchGrid": null,
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [],
+      "outputs": [
+        {
+          "recordKind": "NodeOutput",
+          "recordType": "ItemRecord",
+          "varName": "itemOutput",
+          "linkedNodeID": {
+            "name": "StoreNode",
+            "index": 0
+          },
+          "maxRecords": {
+            "resolved": 64,
+            "source": "EMIT_THREADS (64)"
+          },
+          "allocation": {
+            "constCounts": [],
+            "dynamicCount": 1
+          },
+          "ioFlags": {
+            "input": false,
+            "output": true,
+            "readWrite": true,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": null,
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": null,
+          "recordSizeBytes": 16,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "position",
+              "sizeBits": 96
+            },
+            {
+              "name": "kind",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "meshOutputs": [],
+      "globalsUsed": [
+        "config"
+      ],
+      "groupSharedBytes": 0,
+      "globalAccess": {
+        "config": "read"
+      },
+      "dataflow": {
+        "inputFieldsRead": {},
+        "outputFieldsWritten": {
+          "0": {
+            "target": "StoreNode",
+            "recordType": "ItemRecord",
+            "fields": {
+              "position.x": [
+                "buf:config.scale",
+                "sv:SV_DispatchThreadID.x"
+              ],
+              "position.y": [
+                "const:0"
+              ],
+              "position.z": [
+                "const:0"
+              ],
+              "kind": [
+                "sv:SV_DispatchThreadID.x"
+              ]
+            }
+          }
+        },
+        "outputAllocationSources": {
+          "0": [
+            "buf:config.itemsPerGroup",
+            "sv:SV_DispatchThreadID.x"
+          ]
+        },
+        "outputAllocationKinds": {
+          "0": [
+            "per-thread x(dynamic)"
+          ]
+        },
+        "controlSources": [
+          "buf:config.itemsPerGroup",
+          "sv:SV_DispatchThreadID.x"
+        ],
+        "barriers": [],
+        "resources": {
+          "config": {
+            "access": [
+              "read"
+            ],
+            "fields": {
+              "itemsPerGroup": [
+                "read"
+              ],
+              "scale": [
+                "read"
+              ]
+            },
+            "constIndices": {},
+            "indexedBy": {},
+            "valuesFrom": [],
+            "atomicOps": []
+          }
+        }
+      }
+    },
+    {
+      "id": "FanOutNode",
+      "nodeIdIndex": 0,
+      "functionName": "FanOutNode",
+      "group": null,
+      "sourceFile": "src/WorkGraph.hlsl",
+      "sourceLine": 74,
+      "comment": null,
+      "isEntry": false,
+      "launchMode": "broadcasting",
+      "numThreads": {
+        "resolved": [
+          32,
+          1,
+          1
+        ],
+        "source": [
+          "FANOUT_THREADS",
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": null,
+      "maxDispatchGrid": {
+        "resolved": [
+          1024,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [
+        {
+          "recordKind": "DispatchNodeInputRecord",
+          "recordType": "FanOutRecord",
+          "varName": "fan",
+          "linkedNodeID": null,
+          "maxRecords": null,
+          "ioFlags": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "dispatch",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": {
+            "offsetBytes": 0,
+            "componentType": "uint32",
+            "count": 3
+          },
+          "recordSizeBytes": 20,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "DispatchGrid",
+              "sizeBits": 96
+            },
+            {
+              "name": "count",
+              "sizeBits": 32
+            },
+            {
+              "name": "pass",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "recordKind": "NodeOutput",
+          "recordType": "ItemRef",
+          "varName": "refOutput",
+          "linkedNodeID": {
+            "name": "ShadeNode",
+            "index": 0
+          },
+          "maxRecords": {
+            "resolved": 32,
+            "source": "FANOUT_THREADS (32)"
+          },
+          "allocation": {
+            "constCounts": [],
+            "dynamicCount": 1
+          },
+          "ioFlags": {
+            "input": false,
+            "output": true,
+            "readWrite": true,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": null,
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": null,
+          "recordSizeBytes": 8,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "index",
+              "sizeBits": 32
+            },
+            {
+              "name": "pass",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "meshOutputs": [],
+      "globalsUsed": [],
+      "groupSharedBytes": 0,
+      "globalAccess": {},
+      "dataflow": {
+        "inputFieldsRead": {
+          "FanOutRecord": [
+            "count",
+            "pass"
+          ]
+        },
+        "outputFieldsWritten": {
+          "0": {
+            "target": "ShadeNode",
+            "recordType": "ItemRef",
+            "fields": {
+              "index": [
+                "sv:SV_DispatchThreadID.x"
+              ],
+              "pass": [
+                "in:FanOutRecord.pass"
+              ]
+            }
+          }
+        },
+        "outputAllocationSources": {
+          "0": [
+            "in:FanOutRecord.count",
+            "sv:SV_DispatchThreadID.x"
+          ]
+        },
+        "outputAllocationKinds": {
+          "0": [
+            "per-thread x(dynamic)"
+          ]
+        },
+        "controlSources": [
+          "in:FanOutRecord.count",
+          "sv:SV_DispatchThreadID.x"
+        ],
+        "barriers": [],
+        "resources": {}
+      }
+    },
+    {
+      "id": "ShadeNode",
+      "nodeIdIndex": 0,
+      "functionName": "ShadeNode",
+      "group": null,
+      "sourceFile": "src/WorkGraph.hlsl",
+      "sourceLine": 90,
+      "comment": null,
+      "isEntry": false,
+      "launchMode": "thread",
+      "numThreads": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": null,
+      "maxDispatchGrid": null,
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [
+        {
+          "recordKind": "ThreadNodeInputRecord",
+          "recordType": "ItemRef",
+          "varName": "ref",
+          "linkedNodeID": null,
+          "maxRecords": null,
+          "ioFlags": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "thread",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": null,
+          "recordSizeBytes": 8,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "index",
+              "sizeBits": 32
+            },
+            {
+              "name": "pass",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "outputs": [],
+      "meshOutputs": [],
+      "globalsUsed": [
+        "items",
+        "results"
+      ],
+      "groupSharedBytes": 0,
+      "globalAccess": {
+        "items": "read",
+        "results": "write"
+      },
+      "dataflow": {
+        "inputFieldsRead": {
+          "ItemRef": [
+            "index",
+            "pass"
+          ]
+        },
+        "outputFieldsWritten": {},
+        "outputAllocationSources": {},
+        "outputAllocationKinds": {},
+        "controlSources": [],
+        "barriers": [],
+        "resources": {
+          "items": {
+            "access": [
+              "read"
+            ],
+            "fields": {
+              "position": [
+                "read"
+              ],
+              "kind": [
+                "read"
+              ]
+            },
+            "constIndices": {},
+            "indexedBy": {
+              "in:ItemRef.index": [
+                "read"
+              ]
+            },
+            "valuesFrom": [],
+            "atomicOps": []
+          },
+          "results": {
+            "access": [
+              "write"
+            ],
+            "fields": {},
+            "constIndices": {},
+            "indexedBy": {
+              "in:ItemRef.index": [
+                "write"
+              ]
+            },
+            "valuesFrom": [
+              "buf:items.kind",
+              "buf:items.position",
+              "in:ItemRef.pass"
+            ],
+            "atomicOps": []
+          }
+        }
+      }
+    },
+    {
+      "id": "StoreNode",
+      "nodeIdIndex": 0,
+      "functionName": "StoreNode",
+      "group": null,
+      "sourceFile": "src/WorkGraph.hlsl",
+      "sourceLine": 43,
+      "comment": null,
+      "isEntry": false,
+      "launchMode": "thread",
+      "numThreads": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": null,
+      "maxDispatchGrid": null,
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [
+        {
+          "recordKind": "ThreadNodeInputRecord",
+          "recordType": "ItemRecord",
+          "varName": "item",
+          "linkedNodeID": null,
+          "maxRecords": null,
+          "ioFlags": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "thread",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": null,
+          "recordSizeBytes": 16,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "position",
+              "sizeBits": 96
+            },
+            {
+              "name": "kind",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "outputs": [],
+      "meshOutputs": [],
+      "globalsUsed": [
+        "items",
+        "counters"
+      ],
+      "groupSharedBytes": 0,
+      "globalAccess": {
+        "counters": "atomic",
+        "items": "write"
+      },
+      "dataflow": {
+        "inputFieldsRead": {
+          "ItemRecord": [
+            "kind",
+            "position.x",
+            "position.y",
+            "position.z"
+          ]
+        },
+        "outputFieldsWritten": {},
+        "outputAllocationSources": {},
+        "outputAllocationKinds": {},
+        "controlSources": [],
+        "barriers": [],
+        "resources": {
+          "counters": {
+            "access": [
+              "atomic"
+            ],
+            "fields": {
+              "[0]": [
+                "atomic"
+              ]
+            },
+            "constIndices": {
+              "0": [
+                "atomic"
+              ]
+            },
+            "indexedBy": {},
+            "valuesFrom": [
+              "const:1"
+            ],
+            "atomicOps": [
+              "add"
+            ]
+          },
+          "items": {
+            "access": [
+              "write"
+            ],
+            "fields": {
+              "position": [
+                "write"
+              ],
+              "kind": [
+                "write"
+              ]
+            },
+            "constIndices": {},
+            "indexedBy": {
+              "buf:counters[0]": [
+                "write"
+              ]
+            },
+            "valuesFrom": [
+              "in:ItemRecord.kind",
+              "in:ItemRecord.position.x",
+              "in:ItemRecord.position.y",
+              "in:ItemRecord.position.z"
+            ],
+            "atomicOps": []
+          }
+        }
+      }
+    }
+  ],
+  "globals": [
+    {
+      "name": "config",
+      "resourceClass": "SRV",
+      "rw": false,
+      "kind": "StructuredBuffer",
+      "valueType": "Config",
+      "regType": "t",
+      "regSlot": 0,
+      "space": 0,
+      "globallyCoherent": null,
+      "hasCounter": null,
+      "rasterizerOrdered": null,
+      "file": null
+    },
+    {
+      "name": "items",
+      "resourceClass": "UAV",
+      "rw": true,
+      "kind": "StructuredBuffer",
+      "valueType": "Item",
+      "regType": "u",
+      "regSlot": 0,
+      "space": 0,
+      "globallyCoherent": false,
+      "hasCounter": false,
+      "rasterizerOrdered": false,
+      "file": null
+    },
+    {
+      "name": "counters",
+      "resourceClass": "UAV",
+      "rw": true,
+      "kind": "StructuredBuffer",
+      "valueType": "uint",
+      "regType": "u",
+      "regSlot": 1,
+      "space": 0,
+      "globallyCoherent": false,
+      "hasCounter": false,
+      "rasterizerOrdered": false,
+      "file": null
+    },
+    {
+      "name": "results",
+      "resourceClass": "UAV",
+      "rw": true,
+      "kind": "StructuredBuffer",
+      "valueType": "float",
+      "regType": "u",
+      "regSlot": 2,
+      "space": 0,
+      "globallyCoherent": false,
+      "hasCounter": false,
+      "rasterizerOrdered": false,
+      "file": null
+    }
+  ],
+  "recordTypes": {
+    "DrawEntryRecord": {
+      "sizeBytes": 4,
+      "alignBytes": 4,
+      "file": "src/WorkGraph.hlsl",
+      "line": 16,
+      "fields": [
+        {
+          "name": "pass",
+          "type": "uint",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 0,
+          "sizeBytes": 4,
+          "line": 16,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [
+              "DrawEntryNode"
+            ],
+            "writtenBy": [],
+            "sources": [],
+            "indexes": [],
+            "sizesOutputs": [],
+            "flowsTo": [
+              "FanOutRecord.pass"
+            ],
+            "controls": []
+          }
+        }
+      ],
+      "roles": [
+        "node-record",
+        "cpu-entry-record"
+      ],
+      "usage": {
+        "producers": [],
+        "consumers": [
+          "DrawEntryNode"
+        ],
+        "buffers": []
+      },
+      "dxil": {
+        "recordSizeBytes": 4,
+        "alignment": 4,
+        "dispatchGridField": null,
+        "flagsByNode": {
+          "DrawEntryNode": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "dispatch",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          }
+        }
+      }
+    },
+    "FanOutRecord": {
+      "sizeBytes": 20,
+      "alignBytes": 4,
+      "file": "src/WorkGraph.hlsl",
+      "line": 17,
+      "fields": [
+        {
+          "name": "DispatchGrid",
+          "type": "uint3",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 0,
+          "sizeBytes": 12,
+          "line": 17,
+          "sourceSemantic": "SV_DispatchGrid",
+          "comment": null,
+          "semantic": "SV_DispatchGrid",
+          "dataflow": {
+            "readBy": [],
+            "writtenBy": [
+              "DrawEntryNode"
+            ],
+            "sources": [
+              "buf:counters[0]",
+              "const:1"
+            ],
+            "indexes": [],
+            "sizesOutputs": [],
+            "flowsTo": [],
+            "controls": []
+          }
+        },
+        {
+          "name": "count",
+          "type": "uint",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 12,
+          "sizeBytes": 4,
+          "line": 17,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [
+              "FanOutNode"
+            ],
+            "writtenBy": [
+              "DrawEntryNode"
+            ],
+            "sources": [
+              "buf:counters[0]"
+            ],
+            "indexes": [],
+            "sizesOutputs": [
+              {
+                "node": "FanOutNode",
+                "output": "ShadeNode"
+              }
+            ],
+            "flowsTo": [],
+            "controls": [
+              "FanOutNode"
+            ]
+          }
+        },
+        {
+          "name": "pass",
+          "type": "uint",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 16,
+          "sizeBytes": 4,
+          "line": 17,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [
+              "FanOutNode"
+            ],
+            "writtenBy": [
+              "DrawEntryNode"
+            ],
+            "sources": [
+              "in:DrawEntryRecord.pass"
+            ],
+            "indexes": [],
+            "sizesOutputs": [],
+            "flowsTo": [
+              "ItemRef.pass"
+            ],
+            "controls": []
+          }
+        }
+      ],
+      "roles": [
+        "node-record"
+      ],
+      "usage": {
+        "producers": [
+          "DrawEntryNode"
+        ],
+        "consumers": [
+          "FanOutNode"
+        ],
+        "buffers": []
+      },
+      "dxil": {
+        "recordSizeBytes": 20,
+        "alignment": 4,
+        "dispatchGridField": {
+          "offsetBytes": 0,
+          "componentType": "uint32",
+          "count": 3
+        },
+        "flagsByNode": {
+          "FanOutNode": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "dispatch",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          }
+        }
+      }
+    },
+    "ItemRecord": {
+      "sizeBytes": 16,
+      "alignBytes": 4,
+      "file": "src/WorkGraph.hlsl",
+      "line": 15,
+      "fields": [
+        {
+          "name": "position",
+          "type": "float3",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 0,
+          "sizeBytes": 12,
+          "line": 15,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [
+              "StoreNode"
+            ],
+            "writtenBy": [
+              "EmitNode"
+            ],
+            "sources": [
+              "buf:config.scale",
+              "sv:SV_DispatchThreadID.x",
+              "const:0"
+            ],
+            "indexes": [],
+            "sizesOutputs": [],
+            "flowsTo": [],
+            "controls": []
+          }
+        },
+        {
+          "name": "kind",
+          "type": "uint",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 12,
+          "sizeBytes": 4,
+          "line": 15,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [
+              "StoreNode"
+            ],
+            "writtenBy": [
+              "EmitNode"
+            ],
+            "sources": [
+              "sv:SV_DispatchThreadID.x"
+            ],
+            "indexes": [],
+            "sizesOutputs": [],
+            "flowsTo": [],
+            "controls": []
+          }
+        }
+      ],
+      "roles": [
+        "node-record"
+      ],
+      "usage": {
+        "producers": [
+          "EmitNode"
+        ],
+        "consumers": [
+          "StoreNode"
+        ],
+        "buffers": []
+      },
+      "dxil": {
+        "recordSizeBytes": 16,
+        "alignment": 4,
+        "dispatchGridField": null,
+        "flagsByNode": {
+          "StoreNode": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "thread",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          }
+        }
+      }
+    },
+    "ItemRef": {
+      "sizeBytes": 8,
+      "alignBytes": 4,
+      "file": "src/WorkGraph.hlsl",
+      "line": 18,
+      "fields": [
+        {
+          "name": "index",
+          "type": "uint",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 0,
+          "sizeBytes": 4,
+          "line": 18,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [
+              "ShadeNode"
+            ],
+            "writtenBy": [
+              "FanOutNode"
+            ],
+            "sources": [
+              "sv:SV_DispatchThreadID.x"
+            ],
+            "indexes": [
+              {
+                "resource": "items",
+                "node": "ShadeNode",
+                "via": null
+              },
+              {
+                "resource": "results",
+                "node": "ShadeNode",
+                "via": null
+              }
+            ],
+            "sizesOutputs": [],
+            "flowsTo": [],
+            "controls": []
+          }
+        },
+        {
+          "name": "pass",
+          "type": "uint",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 4,
+          "sizeBytes": 4,
+          "line": 18,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [
+              "ShadeNode"
+            ],
+            "writtenBy": [
+              "FanOutNode"
+            ],
+            "sources": [
+              "in:FanOutRecord.pass"
+            ],
+            "indexes": [],
+            "sizesOutputs": [],
+            "flowsTo": [],
+            "controls": []
+          }
+        }
+      ],
+      "roles": [
+        "node-record"
+      ],
+      "usage": {
+        "producers": [
+          "FanOutNode"
+        ],
+        "consumers": [
+          "ShadeNode"
+        ],
+        "buffers": []
+      },
+      "dxil": {
+        "recordSizeBytes": 8,
+        "alignment": 4,
+        "dispatchGridField": null,
+        "flagsByNode": {
+          "ShadeNode": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "thread",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          }
+        }
+      }
+    },
+    "Config": {
+      "sizeBytes": 8,
+      "alignBytes": 4,
+      "file": "src/WorkGraph.hlsl",
+      "line": 7,
+      "fields": [
+        {
+          "name": "itemsPerGroup",
+          "type": "uint",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 0,
+          "sizeBytes": 4,
+          "line": 7,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [
+              "EmitNode"
+            ],
+            "writtenBy": [],
+            "sources": [],
+            "indexes": [],
+            "sizesOutputs": [
+              {
+                "node": "EmitNode",
+                "output": "StoreNode"
+              }
+            ],
+            "flowsTo": [],
+            "controls": [
+              "EmitNode"
+            ]
+          }
+        },
+        {
+          "name": "scale",
+          "type": "float",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 4,
+          "sizeBytes": 4,
+          "line": 7,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [
+              "EmitNode"
+            ],
+            "writtenBy": [],
+            "sources": [],
+            "indexes": [],
+            "sizesOutputs": [],
+            "flowsTo": [
+              "ItemRecord.position"
+            ],
+            "controls": []
+          }
+        }
+      ],
+      "roles": [
+        "buffer-element"
+      ],
+      "usage": {
+        "producers": [],
+        "consumers": [],
+        "buffers": [
+          "config"
+        ]
+      },
+      "dxil": null
+    },
+    "Item": {
+      "sizeBytes": 16,
+      "alignBytes": 4,
+      "file": "src/WorkGraph.hlsl",
+      "line": 8,
+      "fields": [
+        {
+          "name": "position",
+          "type": "float3",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 0,
+          "sizeBytes": 12,
+          "line": 8,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [
+              "ShadeNode"
+            ],
+            "writtenBy": [
+              "StoreNode"
+            ],
+            "sources": [],
+            "indexes": [],
+            "sizesOutputs": [],
+            "flowsTo": [],
+            "controls": []
+          }
+        },
+        {
+          "name": "kind",
+          "type": "uint",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 12,
+          "sizeBytes": 4,
+          "line": 8,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [
+              "ShadeNode"
+            ],
+            "writtenBy": [
+              "StoreNode"
+            ],
+            "sources": [],
+            "indexes": [],
+            "sizesOutputs": [],
+            "flowsTo": [],
+            "controls": []
+          }
+        }
+      ],
+      "roles": [
+        "buffer-element"
+      ],
+      "usage": {
+        "producers": [],
+        "consumers": [],
+        "buffers": [
+          "items"
+        ]
+      },
+      "dxil": null
+    }
+  }
+}

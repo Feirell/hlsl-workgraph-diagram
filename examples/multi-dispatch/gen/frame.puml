@@ -1,0 +1,132 @@
+@startuml WorkGraphDispatches
+hide empty description
+skinparam DefaultFontColor #1A1A1A
+skinparam ArrowColor #555555
+skinparam ArrowFontColor #333333
+skinparam NoteBackgroundColor #FBFBFB
+skinparam NoteBorderColor #999999
+skinparam NoteBorderThickness 1
+skinparam NoteFontSize 9
+skinparam NoteFontColor #1A1A1A
+skinparam PackageBorderColor #555555
+skinparam PackageFontColor #1A1A1A
+skinparam LegendBorderColor #555555
+skinparam LegendFontColor #1A1A1A
+skinparam LegendFontSize 11
+skinparam rectangle {
+    RoundCorner 12
+    BorderColor #555555
+    BackgroundColor<<broadcasting>> #CFE8FF
+    BackgroundColor<<coalescing>> #FFF3B0
+    BackgroundColor<<thread>> #D9F2D9
+    BackgroundColor<<mesh>> #F5CFEA
+    BackgroundColor<<unknown>> #EEEEEE
+    BackgroundColor<<external>> #F2F2F2
+    BorderColor<<entry>> #C0392B
+    BorderThickness<<entry>> 3
+    BorderStyle<<external>> dashed
+    BorderStyle<<multi>> dashed
+}
+skinparam rectangle {
+    BackgroundColor<<dead>> #F2F2F2
+    BorderStyle<<dead>> dotted
+    FontColor<<dead>> #888888
+}
+skinparam database {
+    BackgroundColor #F5EBD8
+    BorderColor #9C7A3C
+}
+skinparam PackageFontSize 15
+
+package "<b>produce</b>\n<size:10>entry EmitNode</size>" as D_produce {
+    rectangle "<color:#1A5276>EmitNode</color>\n\n<i><size:9>Depth: 0 | Grid: (4, <color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>) | Threads: (64, <color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>)</size></i>\n\n<i><size:10>Globals read only:</size></i>\n<i><size:10>  <color:#8A6D3B>config</color> (t0) <color:#8A8A8A><<Config>></color></size></i>\n<i><size:10>Record out:</size></i>\n<i><size:10>  <color:#8E44AD><<ItemRecord>></color> (64)</size></i>" as produce__EmitNode <<broadcasting>> <<entry>> <<multi>>
+    rectangle "<color:#1A5276>StoreNode</color>\n\n<i><size:9>Depth: 1</size></i>\n\n<i><size:10>Record in:</size></i>\n<i><size:10>  <color:#8E44AD><<ItemRecord>></color></size></i>\n<i><size:10>Globals written:</size></i>\n<i><size:10>  <color:#8A6D3B>counters</color> (u1) <color:#8A8A8A><<uint>></color> (atomic add)</size></i>\n<i><size:10>  <color:#8A6D3B>items</color> (u0) <color:#8A8A8A><<Item>></color></size></i>" as produce__StoreNode <<thread>>
+}
+
+package "<b>consume-color</b>\n<size:10>entry DrawEntryNode</size>\n<size:10>entry record: pass = 0</size>\n<size:9><i>pass → copied to FanOutRecord.pass, ItemRef.pass</i></size>" as D_consume_color {
+    rectangle "<color:#1A5276>DrawEntryNode</color>\n\n<i><size:9>Depth: 0 | Grid: (<color:#8A8A8A>1</color>,<color:#8A8A8A>1</color>,<color:#8A8A8A>1</color>) | Threads: (<color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>)</size></i>\n\n<i><size:10>Globals read only:</size></i>\n<i><size:10>  <color:#8A6D3B>counters</color> (u1) <color:#8A8A8A><<uint>></color></size></i>\n<i><size:10>Record in:</size></i>\n<i><size:10>  <color:#8E44AD><<DrawEntryRecord>></color></size></i>\n<i><size:10>Record out:</size></i>\n<i><size:10>  <color:#8E44AD><<FanOutRecord>></color> (1)</size></i>" as consume_color__DrawEntryNode <<broadcasting>> <<entry>>
+    rectangle "<color:#1A5276>FanOutNode</color>\n\n<i><size:9>Depth: 1 | Grid: ≤(1024, <color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>) dynamic | Threads: (32, <color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>)</size></i>\n\n<i><size:10>Record in:</size></i>\n<i><size:10>  <color:#8E44AD><<FanOutRecord>></color></size></i>\n<i><size:10>Record out:</size></i>\n<i><size:10>  <color:#8E44AD><<ItemRef>></color> (32)</size></i>" as consume_color__FanOutNode <<broadcasting>> <<multi>>
+    rectangle "<color:#1A5276>ShadeNode</color>\n\n<i><size:9>Depth: 2</size></i>\n\n<i><size:10>Globals read only:</size></i>\n<i><size:10>  <color:#8A6D3B>items</color> (u0) <color:#8A8A8A><<Item>></color></size></i>\n<i><size:10>Record in:</size></i>\n<i><size:10>  <color:#8E44AD><<ItemRef>></color></size></i>\n<i><size:10>Globals written:</size></i>\n<i><size:10>  <color:#8A6D3B>results</color> (u2) <color:#8A8A8A><<float>></color></size></i>" as consume_color__ShadeNode <<thread>>
+}
+
+package "<b>consume-stats</b>\n<size:10>entry DrawEntryNode</size>\n<size:10>entry record: pass = 1</size>\n<size:10>defines: WITH_STATS=1</size>\n<size:9><i>pass → copied to FanOutRecord.pass, ItemRef.pass</i></size>" as D_consume_stats {
+    rectangle "<color:#1A5276>DrawEntryNode</color>\n\n<i><size:9>Depth: 0 | Grid: (<color:#8A8A8A>1</color>,<color:#8A8A8A>1</color>,<color:#8A8A8A>1</color>) | Threads: (<color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>)</size></i>\n\n<i><size:10>Globals read only:</size></i>\n<i><size:10>  <color:#8A6D3B>counters</color> (u1) <color:#8A8A8A><<uint>></color></size></i>\n<i><size:10>Record in:</size></i>\n<i><size:10>  <color:#8E44AD><<DrawEntryRecord>></color></size></i>\n<i><size:10>Record out:</size></i>\n<i><size:10>  <color:#8E44AD><<FanOutRecord>></color> (1)</size></i>" as consume_stats__DrawEntryNode <<broadcasting>> <<entry>>
+    rectangle "<color:#1A5276>FanOutNode</color>\n\n<i><size:9>Depth: 1 | Grid: ≤(1024, <color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>) dynamic | Threads: (32, <color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>)</size></i>\n\n<i><size:10>Record in:</size></i>\n<i><size:10>  <color:#8E44AD><<FanOutRecord>></color></size></i>\n<i><size:10>Record out:</size></i>\n<i><size:10>  <color:#8E44AD><<ItemRef>></color> (32)</size></i>" as consume_stats__FanOutNode <<broadcasting>> <<multi>>
+    rectangle "<color:#1A5276>ShadeNode</color>\n\n<i><size:9>Depth: 2</size></i>\n\n<i><size:10>Globals read only:</size></i>\n<i><size:10>  <color:#8A6D3B>items</color> (u0) <color:#8A8A8A><<Item>></color></size></i>\n<i><size:10>Record in:</size></i>\n<i><size:10>  <color:#8E44AD><<ItemRef>></color></size></i>\n<i><size:10>Globals written:</size></i>\n<i><size:10>  <color:#8A6D3B>results</color> (u2) <color:#8A8A8A><<float>></color></size></i>\n<i><size:10>  <color:#8A6D3B>counters</color> (u1) <color:#8A8A8A><<uint>></color> (atomic add)</size></i>" as consume_stats__ShadeNode <<thread>>
+}
+
+database "<b><color:#8A6D3B>items</color></b>\n\n<i><size:9>RWStructuredBuffer · u0</size></i>\n<i><size:9><color:#8A8A8A><<Item>></color></size></i>" as res_items
+database "<b><color:#8A6D3B>counters</color></b>\n\n<i><size:9>RWStructuredBuffer · u1</size></i>\n<i><size:9><color:#8A8A8A><<uint>></color></size></i>" as res_counters
+database "<b><color:#8A6D3B>results</color></b>\n\n<i><size:9>RWStructuredBuffer · u2</size></i>\n<i><size:9><color:#8A8A8A><<float>></color></size></i>" as res_results
+
+produce__EmitNode --> produce__StoreNode
+note on link
+  <i><color:#8E44AD><<ItemRecord>></color></i> (64)
+  <size:8>itemOutput</size>
+end note
+consume_color__DrawEntryNode --> consume_color__FanOutNode
+note on link
+  <i><color:#8E44AD><<FanOutRecord>></color></i> (1)
+  <size:8>fanOutput</size>
+end note
+consume_color__FanOutNode --> consume_color__ShadeNode
+note on link
+  <i><color:#8E44AD><<ItemRef>></color></i> (32)
+  <size:8>refOutput</size>
+end note
+consume_stats__DrawEntryNode --> consume_stats__FanOutNode
+note on link
+  <i><color:#8E44AD><<FanOutRecord>></color></i> (1)
+  <size:8>fanOutput</size>
+end note
+consume_stats__FanOutNode --> consume_stats__ShadeNode
+note on link
+  <i><color:#8E44AD><<ItemRef>></color></i> (32)
+  <size:8>refOutput</size>
+end note
+
+produce__StoreNode -[#D68910,dashed]-> res_counters : atomic
+produce__StoreNode -[#C0392B,dashed]-> res_items : write
+res_counters -[#2471A3,dashed]-> consume_color__DrawEntryNode : read
+res_items -[#2471A3,dashed]-> consume_color__ShadeNode : read
+consume_color__ShadeNode -[#C0392B,dashed]-> res_results : write
+consume_stats__ShadeNode -[#D68910,dashed]-> res_counters : atomic
+res_counters -[#2471A3,dashed]-> consume_stats__DrawEntryNode : read
+res_items -[#2471A3,dashed]-> consume_stats__ShadeNode : read
+consume_stats__ShadeNode -[#C0392B,dashed]-> res_results : write
+
+legend right
+  Global resources:
+  |  Identifier  |  Slot  |  Kind  |  Value type  |  Used?  |
+  |  <b><color:#8A6D3B>config</color></b>  |  t0  |  StructuredBuffer  |  Config  |  ✓  |
+  |  <b><color:#8A6D3B>items</color></b>  |  u0  |  RWStructuredBuffer  |  Item  |  ✓  |
+  |  <b><color:#8A6D3B>counters</color></b>  |  u1  |  RWStructuredBuffer  |  uint  |  ✓  |
+  |  <b><color:#8A6D3B>results</color></b>  |  u2  |  RWStructuredBuffer  |  float  |  ✓  |
+  
+  Register slot prefixes:
+  t<NR> := SRV (shader resource view) - read-only buffer/texture
+  u<NR> := UAV (unordered access view) - read-write buffer/texture
+  b<NR> := CBV (constant buffer view) - small constant-buffer data
+  s<NR> := sampler state
+  
+  <b>Dispatch definitions (pipeline.config.json, in order)</b>
+  |  #  |  Dispatch  |  Entry  |  Nodes (live/dead)  |
+  |  produce  |  produce  |  EmitNode  |  2/0  |
+  |  consume-color  |  consume-color  |  DrawEntryNode  |  3/0  |
+  |  consume-stats  |  consume-stats  |  DrawEntryNode  |  3/0  |
+  <i>From the dispatch definitions (not inferred): dispatch order, entry nodes, entry-record values, defines. Everything else is read from the DXIL.</i>
+  
+  <color:#C0392B>dashed red</color> = node writes the UAV · <color:#D68910>dashed orange</color> = atomic (allocator/counter)
+  <color:#2471A3>dashed blue</color> = node reads the UAV · dotted grey = declared but never launched (0 records allocated)
+  Solid arrows = work-graph records inside one dispatch; resource access is read from the compiled DXIL
+  
+  |  Color  |  Launch mode  |
+  |  <#CFE8FF>  |  broadcasting  |
+  |  <#FFF3B0>  |  coalescing  |
+  |  <#D9F2D9>  |  thread  |
+  |  <#F5CFEA>  |  mesh  |
+  Red border = the dispatch's entrypoint · dashed border = grid can expand to >1 group
+  <size:7><color:#8A8A8A>hlsl-workgraph-diagram v2.2.0 · dxil parsing</color></size>
+  <size:7><color:#8A8A8A>dxc: libdxcompiler.so: 1.9(dev;4480-cfc8ba0c)</color></size>
+endlegend
+@enduml

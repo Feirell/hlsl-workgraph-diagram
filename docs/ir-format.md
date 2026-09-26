@@ -12,12 +12,44 @@ never talks to either parser's own internals. Written by `../src/common/ir.js`'s
 ```json
 {
   "irVersion": 1,
-  "generator": "parse-source",
-  "generatorDetail": { "...": "free-form, generator-specific provenance - rootDir/nodeDirs for parse-source, entryFile/defines for parse-dxil" },
-  "nodes": [ /* Node, see below */ ],
-  "globals": [ /* Global, see below */ ]
+  "generator": "parse-dxil",
+  "generatorDetail": { "entryFile": "...", "defines": [], "profile": "lib_6_8", "dxcVersion": "..." },
+  "nodes":       [ /* Node, see below */ ],
+  "globals":     [ /* Global, see below */ ],
+  "recordTypes": { /* parse-dxil only: struct layouts + per-field dataflow, see below */ },
+  "dispatch":    { /* pipeline per-dispatch IRs only: the definition this IR was cut for */ }
 }
 ```
+
+`generatorDetail` is free-form provenance (`rootDir`/`nodeDirs` for parse-source; `entryFile`, `defines`,
+`profile`, `extraArgs`, `dxcExe`, `dxcVersion` for parse-dxil). `recordTypes`, `dispatch`, and the node fields
+marked *optional* below exist only when the generator produces them; every consumer treats them as absent
+otherwise. The `pipeline` writes source paths relative to its config file; `parse-dxil` writes them as dxc
+reports them (usually absolute).
+
+A trimmed parse-dxil node, to show how the pieces fit (from `examples/multi-dispatch`):
+
+```json
+{
+  "id": "ShadeNode", "launchMode": "thread", "isEntry": false,
+  "inputs": [{ "recordKind": "ThreadNodeInputRecord", "recordType": "ItemRef", "recordSizeBytes": 8 }],
+  "outputs": [],
+  "globalsUsed": ["items", "results"],
+  "globalAccess": { "items": "read", "results": "write" },
+  "dataflow": {
+    "inputFieldsRead": { "ItemRef": ["index", "pass"] },
+    "resources": {
+      "items":   { "access": ["read"],  "fields": { "position": ["read"], "kind": ["read"] }, "indexedBy": { "in:ItemRef.index": ["read"] } },
+      "results": { "access": ["write"], "fields": {}, "indexedBy": { "in:ItemRef.index": ["write"] }, "valuesFrom": ["buf:items.kind", "buf:items.position", "in:ItemRef.pass"] }
+    },
+    "controlSources": [],
+    "barriers": []
+  }
+}
+```
+
+`pass` selects between two values (`pass == 0 ? position.x : kind`); dxc compiles that to a `select`, so it is a
+data source of the `results` write, not a branch condition - `controlSources` lists only `br`/`switch` conditions.
 
 ## Value fields: `{ resolved, source }`
 
@@ -110,6 +142,13 @@ influences another solely through a branch condition is not a source.
 
 Node params additionally carry `ioFlags` (decoded NodeIOFlags) and `dispatchGridField`.
 
+## `dispatch` (pipeline per-dispatch IRs only)
+
+`{ name, entry, entryRecord, defines }` - the dispatch definition the IR was cut for. Such an IR holds only the
+nodes reachable from `entry` (statically dead ones included), the globals they use, and the record types they
+produce, consume or read from buffers (plus nested structs); per-field node lists in `recordTypes` are cut to the
+same node set. See `pipeline.md`.
+
 ## Node
 
 | Field | Type | parse-source | parse-dxil |
@@ -143,6 +182,8 @@ Node params additionally carry `ioFlags` (decoded NodeIOFlags) and `dispatchGrid
 | `maxRecords` | scalar\|null | ✓ | ✓ |
 | `maxRecordsSharedWith` | scalar\|null | outputs only, from `[MaxRecordsSharedWith(...)]` text | **always `null`** - the DXIL tag for this was never verified against a real compile (see `experimental/README.md`'s history) |
 | `recordSizeBytes` / `recordAlignment` | number\|null, optional | absent | from the DXIL NodeRecordType metadata (tag 2: `[0: size, 1: SV_DispatchGrid, 2: alignment]`) - the real padded size, unlike summing `recordFields` |
+| `ioFlags` | object, optional | absent | decoded NodeIOFlags: `input`, `output`, `readWrite`, `emptyRecord`, `nodeArray`, `granularity` (`thread`/`group`/`dispatch`), `trackRWInputSharing`, `globallyCoherent` |
+| `dispatchGridField` | `{offsetBytes, componentType, count}`\|null, optional | absent | the record's SV_DispatchGrid entry from the NodeRecordType metadata (tag 1) |
 | `allocation` | `{constCounts: number[], dynamicCount: number}`, outputs only, optional | absent | every `allocateNodeOutputRecords` call on this output: literal counts, and how many are computed at runtime. All-literal-zero means the edge never carries a record |
 | `recordFields` | `{name, sizeBits}[]`\|null | **always `null`** - v1 never resolves struct definitions | the record struct's field list, from debug info - richer here than parse-source, not currently rendered by build-puml |
 
@@ -164,6 +205,7 @@ blocks stripped, trailing identifier taken as the name. Verified against `exampl
 | `rw` | boolean | literal `RW` prefix in the source | **derived, not literal**: `resourceClass === 'UAV'` - exactly equivalent for every resource kind this tool models (a buffer is only ever compiled into the UAV class *because* it's read-write) |
 | `valueType` | string\|null | the `<T>` template argument text | the same, recovered by finding this specific global's own LLVM type annotation in the raw disassembly (`extractResourceValueType()`) and pulling the `<...>` out of it - not from the resource metadata tuple, which doesn't carry a friendly type name. Builtin vector/matrix aliases (`float3`, `float4x4`, ...) are normalized back from dxc's own spelling (`vector<float, 3>`, `matrix<float, 4, 4>`) - see `normalizeDxilTypeName()` and the gotcha below. |
 | `file` | string\|null | declaring file | **always `null`** - would need a debug-info cross-reference (`!DIGlobalVariable`) not yet implemented |
+| `globallyCoherent` / `hasCounter` / `rasterizerOrdered` | boolean\|null, optional | absent | UAVs only, from the `!dx.resources` UAV record (`[..., kind, globallyCoherent, hasCounter, ROV, ...]`); `null` for other classes |
 
 All of `kind`/`rw`/`valueType`/`regType`/`regSlot`/`space` for `parse-dxil` are verified against a real
 `StructuredBuffer<T>` SRV, for `T` = a plain struct (the fixture's `itemMeta`), a struct containing a
@@ -209,6 +251,13 @@ it's invisible to `parse-dxil` - not just "shown as unused", genuinely absent fr
 about DCE) while `parse-dxil`'s IR has zero globals for that same example.
 
 ## Known differences between the two generators - a real comparison, not a hypothetical
+
+**The analysis fields are parse-dxil only.** `globalAccess`, `groupSharedBytes`, `dataflow`, the param fields
+`recordSizeBytes`/`recordAlignment`/`ioFlags`/`dispatchGridField`/`allocation`, the UAV flags on globals and the
+whole `recordTypes` section are read from compiled code and metadata that a text scan cannot see. With a
+parse-source IR, `build-puml` falls back to a single "Globals used" list, `build-records` refuses (no layouts),
+and `validate` skips every check that needs them. The numbered items below compare what both generators produce.
+
 
 Run against `examples/simple-pipeline` and `examples/mesh-culling` (see each example's own `README.md` for
 the exact commands and rendered side-by-side comparison). Every node/edge/launch-mode/dispatch-grid/

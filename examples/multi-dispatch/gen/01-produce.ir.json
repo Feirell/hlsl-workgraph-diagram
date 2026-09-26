@@ -1,0 +1,583 @@
+{
+  "irVersion": 1,
+  "generator": "parse-dxil",
+  "generatorDetail": {
+    "entryFile": "src/WorkGraph.hlsl",
+    "defines": [],
+    "profile": "lib_6_8",
+    "extraArgs": [],
+    "dxcExe": "/opt/dxc/bin/dxc",
+    "dxcVersion": "libdxcompiler.so: 1.9(dev;4480-cfc8ba0c)"
+  },
+  "nodes": [
+    {
+      "id": "EmitNode",
+      "nodeIdIndex": 0,
+      "functionName": "EmitNode",
+      "group": null,
+      "sourceFile": "src/WorkGraph.hlsl",
+      "sourceLine": 28,
+      "comment": null,
+      "isEntry": true,
+      "launchMode": "broadcasting",
+      "numThreads": {
+        "resolved": [
+          64,
+          1,
+          1
+        ],
+        "source": [
+          "EMIT_THREADS",
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": {
+        "resolved": [
+          4,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "maxDispatchGrid": null,
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [],
+      "outputs": [
+        {
+          "recordKind": "NodeOutput",
+          "recordType": "ItemRecord",
+          "varName": "itemOutput",
+          "linkedNodeID": {
+            "name": "StoreNode",
+            "index": 0
+          },
+          "maxRecords": {
+            "resolved": 64,
+            "source": "EMIT_THREADS (64)"
+          },
+          "allocation": {
+            "constCounts": [],
+            "dynamicCount": 1
+          },
+          "ioFlags": {
+            "input": false,
+            "output": true,
+            "readWrite": true,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": null,
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": null,
+          "recordSizeBytes": 16,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "position",
+              "sizeBits": 96
+            },
+            {
+              "name": "kind",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "meshOutputs": [],
+      "globalsUsed": [
+        "config"
+      ],
+      "groupSharedBytes": 0,
+      "globalAccess": {
+        "config": "read"
+      },
+      "dataflow": {
+        "inputFieldsRead": {},
+        "outputFieldsWritten": {
+          "0": {
+            "target": "StoreNode",
+            "recordType": "ItemRecord",
+            "fields": {
+              "position.x": [
+                "buf:config.scale",
+                "sv:SV_DispatchThreadID.x"
+              ],
+              "position.y": [
+                "const:0"
+              ],
+              "position.z": [
+                "const:0"
+              ],
+              "kind": [
+                "sv:SV_DispatchThreadID.x"
+              ]
+            }
+          }
+        },
+        "outputAllocationSources": {
+          "0": [
+            "buf:config.itemsPerGroup",
+            "sv:SV_DispatchThreadID.x"
+          ]
+        },
+        "outputAllocationKinds": {
+          "0": [
+            "per-thread x(dynamic)"
+          ]
+        },
+        "controlSources": [
+          "buf:config.itemsPerGroup",
+          "sv:SV_DispatchThreadID.x"
+        ],
+        "barriers": [],
+        "resources": {
+          "config": {
+            "access": [
+              "read"
+            ],
+            "fields": {
+              "itemsPerGroup": [
+                "read"
+              ],
+              "scale": [
+                "read"
+              ]
+            },
+            "constIndices": {},
+            "indexedBy": {},
+            "valuesFrom": [],
+            "atomicOps": []
+          }
+        }
+      }
+    },
+    {
+      "id": "StoreNode",
+      "nodeIdIndex": 0,
+      "functionName": "StoreNode",
+      "group": null,
+      "sourceFile": "src/WorkGraph.hlsl",
+      "sourceLine": 43,
+      "comment": null,
+      "isEntry": false,
+      "launchMode": "thread",
+      "numThreads": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": null,
+      "maxDispatchGrid": null,
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [
+        {
+          "recordKind": "ThreadNodeInputRecord",
+          "recordType": "ItemRecord",
+          "varName": "item",
+          "linkedNodeID": null,
+          "maxRecords": null,
+          "ioFlags": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "thread",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": null,
+          "recordSizeBytes": 16,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "position",
+              "sizeBits": 96
+            },
+            {
+              "name": "kind",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "outputs": [],
+      "meshOutputs": [],
+      "globalsUsed": [
+        "items",
+        "counters"
+      ],
+      "groupSharedBytes": 0,
+      "globalAccess": {
+        "counters": "atomic",
+        "items": "write"
+      },
+      "dataflow": {
+        "inputFieldsRead": {
+          "ItemRecord": [
+            "kind",
+            "position.x",
+            "position.y",
+            "position.z"
+          ]
+        },
+        "outputFieldsWritten": {},
+        "outputAllocationSources": {},
+        "outputAllocationKinds": {},
+        "controlSources": [],
+        "barriers": [],
+        "resources": {
+          "counters": {
+            "access": [
+              "atomic"
+            ],
+            "fields": {
+              "[0]": [
+                "atomic"
+              ]
+            },
+            "constIndices": {
+              "0": [
+                "atomic"
+              ]
+            },
+            "indexedBy": {},
+            "valuesFrom": [
+              "const:1"
+            ],
+            "atomicOps": [
+              "add"
+            ]
+          },
+          "items": {
+            "access": [
+              "write"
+            ],
+            "fields": {
+              "position": [
+                "write"
+              ],
+              "kind": [
+                "write"
+              ]
+            },
+            "constIndices": {},
+            "indexedBy": {
+              "buf:counters[0]": [
+                "write"
+              ]
+            },
+            "valuesFrom": [
+              "in:ItemRecord.kind",
+              "in:ItemRecord.position.x",
+              "in:ItemRecord.position.y",
+              "in:ItemRecord.position.z"
+            ],
+            "atomicOps": []
+          }
+        }
+      }
+    }
+  ],
+  "globals": [
+    {
+      "name": "config",
+      "resourceClass": "SRV",
+      "rw": false,
+      "kind": "StructuredBuffer",
+      "valueType": "Config",
+      "regType": "t",
+      "regSlot": 0,
+      "space": 0,
+      "globallyCoherent": null,
+      "hasCounter": null,
+      "rasterizerOrdered": null,
+      "file": null
+    },
+    {
+      "name": "items",
+      "resourceClass": "UAV",
+      "rw": true,
+      "kind": "StructuredBuffer",
+      "valueType": "Item",
+      "regType": "u",
+      "regSlot": 0,
+      "space": 0,
+      "globallyCoherent": false,
+      "hasCounter": false,
+      "rasterizerOrdered": false,
+      "file": null
+    },
+    {
+      "name": "counters",
+      "resourceClass": "UAV",
+      "rw": true,
+      "kind": "StructuredBuffer",
+      "valueType": "uint",
+      "regType": "u",
+      "regSlot": 1,
+      "space": 0,
+      "globallyCoherent": false,
+      "hasCounter": false,
+      "rasterizerOrdered": false,
+      "file": null
+    }
+  ],
+  "recordTypes": {
+    "ItemRecord": {
+      "sizeBytes": 16,
+      "alignBytes": 4,
+      "file": "src/WorkGraph.hlsl",
+      "line": 15,
+      "fields": [
+        {
+          "name": "position",
+          "type": "float3",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 0,
+          "sizeBytes": 12,
+          "line": 15,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [
+              "StoreNode"
+            ],
+            "writtenBy": [
+              "EmitNode"
+            ],
+            "sources": [
+              "buf:config.scale",
+              "sv:SV_DispatchThreadID.x",
+              "const:0"
+            ],
+            "indexes": [],
+            "sizesOutputs": [],
+            "flowsTo": [],
+            "controls": []
+          }
+        },
+        {
+          "name": "kind",
+          "type": "uint",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 12,
+          "sizeBytes": 4,
+          "line": 15,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [
+              "StoreNode"
+            ],
+            "writtenBy": [
+              "EmitNode"
+            ],
+            "sources": [
+              "sv:SV_DispatchThreadID.x"
+            ],
+            "indexes": [],
+            "sizesOutputs": [],
+            "flowsTo": [],
+            "controls": []
+          }
+        }
+      ],
+      "roles": [
+        "node-record"
+      ],
+      "usage": {
+        "producers": [
+          "EmitNode"
+        ],
+        "consumers": [
+          "StoreNode"
+        ],
+        "buffers": []
+      },
+      "dxil": {
+        "recordSizeBytes": 16,
+        "alignment": 4,
+        "dispatchGridField": null,
+        "flagsByNode": {
+          "StoreNode": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "thread",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          }
+        }
+      }
+    },
+    "Config": {
+      "sizeBytes": 8,
+      "alignBytes": 4,
+      "file": "src/WorkGraph.hlsl",
+      "line": 7,
+      "fields": [
+        {
+          "name": "itemsPerGroup",
+          "type": "uint",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 0,
+          "sizeBytes": 4,
+          "line": 7,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [
+              "EmitNode"
+            ],
+            "writtenBy": [],
+            "sources": [],
+            "indexes": [],
+            "sizesOutputs": [
+              {
+                "node": "EmitNode",
+                "output": "StoreNode"
+              }
+            ],
+            "flowsTo": [],
+            "controls": [
+              "EmitNode"
+            ]
+          }
+        },
+        {
+          "name": "scale",
+          "type": "float",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 4,
+          "sizeBytes": 4,
+          "line": 7,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [
+              "EmitNode"
+            ],
+            "writtenBy": [],
+            "sources": [],
+            "indexes": [],
+            "sizesOutputs": [],
+            "flowsTo": [
+              "ItemRecord.position"
+            ],
+            "controls": []
+          }
+        }
+      ],
+      "roles": [
+        "buffer-element"
+      ],
+      "usage": {
+        "producers": [],
+        "consumers": [],
+        "buffers": [
+          "config"
+        ]
+      },
+      "dxil": null
+    },
+    "Item": {
+      "sizeBytes": 16,
+      "alignBytes": 4,
+      "file": "src/WorkGraph.hlsl",
+      "line": 8,
+      "fields": [
+        {
+          "name": "position",
+          "type": "float3",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 0,
+          "sizeBytes": 12,
+          "line": 8,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [],
+            "writtenBy": [
+              "StoreNode"
+            ],
+            "sources": [],
+            "indexes": [],
+            "sizesOutputs": [],
+            "flowsTo": [],
+            "controls": []
+          }
+        },
+        {
+          "name": "kind",
+          "type": "uint",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 12,
+          "sizeBytes": 4,
+          "line": 8,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null,
+          "dataflow": {
+            "readBy": [],
+            "writtenBy": [
+              "StoreNode"
+            ],
+            "sources": [],
+            "indexes": [],
+            "sizesOutputs": [],
+            "flowsTo": [],
+            "controls": []
+          }
+        }
+      ],
+      "roles": [
+        "buffer-element"
+      ],
+      "usage": {
+        "producers": [],
+        "consumers": [],
+        "buffers": [
+          "items"
+        ]
+      },
+      "dxil": null
+    }
+  },
+  "dispatch": {
+    "name": "produce",
+    "entry": "EmitNode",
+    "entryRecord": null,
+    "defines": []
+  }
+}

@@ -1,0 +1,71 @@
+== compile compile-1.ir.json (defines [])
+PASS  edge-record-type         DrawEntryNode -> FanOutNode: FanOutRecord (20 B)
+PASS  edge-record-type         EmitNode -> StoreNode: ItemRecord (16 B)
+PASS  edge-record-type         FanOutNode -> ShadeNode: ItemRef (8 B)
+PASS  record-layout-size       DrawEntryRecord: debug info 4 B, DXIL record 4 B
+PASS  record-layout-size       FanOutRecord: debug info 20 B, DXIL record 20 B
+PASS  sv-dispatchgrid          FanOutRecord: metadata +0 uint32 x3, source DispatchGrid
+PASS  record-layout-size       ItemRecord: debug info 16 B, DXIL record 16 B
+PASS  record-layout-size       ItemRef: debug info 8 B, DXIL record 8 B
+PASS  field-written            DrawEntryNode -> FanOutNode: every FanOutRecord element FanOutNode reads is stored on some path (2 read)
+PASS  field-written            FanOutNode -> ShadeNode: every ItemRef element ShadeNode reads is stored on some path (2 read)
+PASS  field-written            EmitNode -> StoreNode: every ItemRecord element StoreNode reads is stored on some path (4 read)
+PASS  node-output-limits       DrawEntryNode: broadcasting: MaxRecords 1, MaxOutputSize 20 B, groupshared 0 B
+PASS  node-output-limits       EmitNode: broadcasting: MaxRecords 64, MaxOutputSize 1024 B, groupshared 0 B
+PASS  node-output-limits       FanOutNode: broadcasting: MaxRecords 32, MaxOutputSize 256 B, groupshared 0 B
+
+14 pass, 0 warn, 0 fail, 0 info
+
+== compile compile-2.ir.json (defines ["WITH_STATS=1"])
+PASS  edge-record-type         DrawEntryNode -> FanOutNode: FanOutRecord (20 B)
+PASS  edge-record-type         EmitNode -> StoreNode: ItemRecord (16 B)
+PASS  edge-record-type         FanOutNode -> ShadeNode: ItemRef (8 B)
+PASS  record-layout-size       DrawEntryRecord: debug info 4 B, DXIL record 4 B
+PASS  record-layout-size       FanOutRecord: debug info 20 B, DXIL record 20 B
+PASS  sv-dispatchgrid          FanOutRecord: metadata +0 uint32 x3, source DispatchGrid
+PASS  record-layout-size       ItemRecord: debug info 16 B, DXIL record 16 B
+PASS  record-layout-size       ItemRef: debug info 8 B, DXIL record 8 B
+PASS  field-written            DrawEntryNode -> FanOutNode: every FanOutRecord element FanOutNode reads is stored on some path (2 read)
+PASS  field-written            FanOutNode -> ShadeNode: every ItemRef element ShadeNode reads is stored on some path (2 read)
+PASS  field-written            EmitNode -> StoreNode: every ItemRecord element StoreNode reads is stored on some path (4 read)
+PASS  node-output-limits       DrawEntryNode: broadcasting: MaxRecords 1, MaxOutputSize 20 B, groupshared 0 B
+PASS  node-output-limits       EmitNode: broadcasting: MaxRecords 64, MaxOutputSize 1024 B, groupshared 0 B
+PASS  node-output-limits       FanOutNode: broadcasting: MaxRecords 32, MaxOutputSize 256 B, groupshared 0 B
+
+14 pass, 0 warn, 0 fail, 0 info
+
+== frame
+PASS  edge-record-type         DrawEntryNode -> FanOutNode: FanOutRecord (20 B)
+PASS  edge-record-type         EmitNode -> StoreNode: ItemRecord (16 B)
+PASS  edge-record-type         FanOutNode -> ShadeNode: ItemRef (8 B)
+PASS  record-layout-size       DrawEntryRecord: debug info 4 B, DXIL record 4 B
+PASS  record-layout-size       FanOutRecord: debug info 20 B, DXIL record 20 B
+PASS  sv-dispatchgrid          FanOutRecord: metadata +0 uint32 x3, source DispatchGrid
+PASS  record-layout-size       ItemRecord: debug info 16 B, DXIL record 16 B
+PASS  record-layout-size       ItemRef: debug info 8 B, DXIL record 8 B
+PASS  field-written            DrawEntryNode -> FanOutNode: every FanOutRecord element FanOutNode reads is stored on some path (2 read)
+PASS  field-written            FanOutNode -> ShadeNode: every ItemRef element ShadeNode reads is stored on some path (2 read)
+PASS  field-written            EmitNode -> StoreNode: every ItemRecord element StoreNode reads is stored on some path (4 read)
+PASS  node-output-limits       DrawEntryNode: broadcasting: MaxRecords 1, MaxOutputSize 20 B, groupshared 0 B
+PASS  node-output-limits       EmitNode: broadcasting: MaxRecords 64, MaxOutputSize 1024 B, groupshared 0 B
+PASS  node-output-limits       FanOutNode: broadcasting: MaxRecords 32, MaxOutputSize 256 B, groupshared 0 B
+PASS  dispatch-entry           produce: EmitNode is a program entry
+PASS  graph-depth              produce: longest chain 2 node(s) (limit 32)
+INFO  dispatch-nodes           produce: EmitNode, StoreNode
+PASS  dispatch-entry           consume-color: DrawEntryNode is a program entry
+PASS  graph-depth              consume-color: longest chain 3 node(s) (limit 32)
+INFO  dispatch-nodes           consume-color: DrawEntryNode, FanOutNode, ShadeNode
+PASS  entry-record             consume-color: DrawEntryRecord.pass (uint, offset 0) = 0
+PASS  dispatch-entry           consume-stats: DrawEntryNode is a program entry
+PASS  graph-depth              consume-stats: longest chain 3 node(s) (limit 32)
+INFO  dispatch-nodes           consume-stats: DrawEntryNode, FanOutNode, ShadeNode
+PASS  entry-record             consume-stats: DrawEntryRecord.pass (uint, offset 0) = 1
+PASS  reachability             all 5 nodes are part of some dispatch
+PASS  cross-dispatch-flow      items: read in consume-color by ShadeNode <- produced by produce:StoreNode
+PASS  cross-dispatch-flow      items: read in consume-stats by ShadeNode <- produced by produce:StoreNode
+PASS  cross-dispatch-flow      counters: read in consume-color by DrawEntryNode <- produced by produce:StoreNode
+INFO  same-dispatch-atomic     counters in consume-stats: plain read by DrawEntryNode while ShadeNode update it atomically - check the elements are disjoint
+PASS  cross-dispatch-flow      counters: read in consume-stats by DrawEntryNode <- produced by produce:StoreNode
+
+27 pass, 0 warn, 0 fail, 4 info
+

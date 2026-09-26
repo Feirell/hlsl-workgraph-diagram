@@ -95,7 +95,8 @@ function fieldComment(sourceFiles, normalizePath, file, line) {
     const own = sourceLine(sourceFiles, normalizePath, file, line);
     if (own == null) return null;
     const trailing = own.match(/;\s*\/\/\s?(.*)$/);
-    if (trailing) return trailing[1].trim() || null;
+    // A trailing comment belongs to the field only when the line declares just that one field.
+    if (trailing) return (own.match(/;/g) || []).length === 1 ? trailing[1].trim() || null : null;
     const above = [];
     for (let l = line - 1; l >= 1; l--) {
         const text = sourceLine(sourceFiles, normalizePath, file, l);
@@ -114,7 +115,8 @@ function layoutOf(struct, sourceFiles, normalizePath) {
         const t = describeType(e.baseType);
         const memberFile = (e.file && e.file.filename) || file;
         const text = sourceLine(sourceFiles, normalizePath, memberFile, e.line);
-        const semantic = text && text.match(/:\s*(SV_\w+)/);
+        // Anchored on the field's own name: several fields can share one source line (a one-line struct).
+        const semantic = text && text.match(new RegExp(`\\b${e.name}\\s*(?:\\[[^\\]]*\\]\\s*)*:\\s*(SV_\\w+)`));
         fields.push({
             name: e.name,
             type: t.type,

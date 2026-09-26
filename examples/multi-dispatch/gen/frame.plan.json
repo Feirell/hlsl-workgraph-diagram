@@ -1,0 +1,32 @@
+{
+  "title": "Dispatch definitions (pipeline.config.json, in order)",
+  "dispatches": [
+    {
+      "id": "produce",
+      "label": "produce",
+      "entry": "EmitNode",
+      "ir": "01-produce.ir.json"
+    },
+    {
+      "id": "consume-color",
+      "label": "consume-color",
+      "entry": "DrawEntryNode",
+      "entryRecord": {
+        "pass": 0
+      },
+      "ir": "02-consume-color.ir.json"
+    },
+    {
+      "id": "consume-stats",
+      "label": "consume-stats",
+      "entry": "DrawEntryNode",
+      "entryRecord": {
+        "pass": 1
+      },
+      "defines": [
+        "WITH_STATS=1"
+      ],
+      "ir": "03-consume-stats.ir.json"
+    }
+  ]
+}
