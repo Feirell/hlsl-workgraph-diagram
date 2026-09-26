@@ -1,0 +1,76 @@
+@startuml RecordLayouts
+hide empty methods
+hide circle
+skinparam classAttributeIconSize 0
+skinparam classFontStyle bold
+skinparam classAttributeFontName monospaced
+skinparam classAttributeFontSize 11
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #5D6D7E
+  BackgroundColor<<cpu-entry-record>> #E8F8F5
+  BackgroundColor<<node-record>> #EBF5FB
+  BackgroundColor<<buffer-element>> #FEF9E7
+  BackgroundColor<<nested>> #F4F6F6
+}
+skinparam packageStyle rectangle
+
+package "Entry records (written by the CPU, NodeCPUInput)" {
+  class DrawEntryRecord <<cpu-entry-record>> {
+    {field} <size:10><color:#5D6D7E>4 B</color></size>
+    ==
+    {field} <color:#7F8C8D> size offset  type           name</color>
+    {field}     4      0  uint           pass
+    ..
+    {field} <size:10><i>produced by the CPU (DispatchGraph NodeCPUInput)</i></size>
+    {field} <size:10><i>consumed by DrawEntryNode</i></size>
+  }
+}
+package "Node records (graph edges)" {
+  class FanOutRecord <<node-record>> {
+    {field} <size:10><color:#5D6D7E>20 B</color></size>
+    ==
+    {field} <color:#7F8C8D> size offset  type           name</color>
+    {field} <back:#FADBD8><color:#C0392B><b>   12      0  uint3          DispatchGrid</b></color></back>
+    {field}               <size:9><color:#C0392B>SV_DispatchGrid (DXIL metadata); ← counters</color></size>
+    {field} <back:#EBDEF0><color:#6C3483><b>    4     12  uint           count</b></color></back>
+    {field}               <size:9><color:#6C3483>count of → ShadeNode (DXIL)</color></size>
+    {field}     4     16  uint           pass
+    ..
+    {field} <size:10><i>produced by DrawEntryNode</i></size>
+    {field} <size:10><i>consumed by FanOutNode</i></size>
+  }
+  class ItemRef <<node-record>> {
+    {field} <size:10><color:#5D6D7E>8 B</color></size>
+    ==
+    {field} <color:#7F8C8D> size offset  type           name</color>
+    {field} <back:#D6EAF8><color:#1F618D><b>    4      0  uint           index</b></color></back>
+    {field}               <size:9><color:#1F618D>→ items[], results[] (DXIL)</color></size>
+    {field}     4      4  uint           pass
+    ..
+    {field} <size:10><i>produced by FanOutNode</i></size>
+    {field} <size:10><i>consumed by ShadeNode</i></size>
+  }
+}
+package "Buffer element types (StructuredBuffer, RWStructuredBuffer)" {
+  class Item <<buffer-element>> {
+    {field} <size:10><color:#5D6D7E>16 B</color></size>
+    ==
+    {field} <color:#7F8C8D> size offset  type           name</color>
+    {field}    12      0  float3         position
+    {field}     4     12  uint           kind
+    ..
+    {field} <size:10><i>element of items</i></size>
+  }
+}
+DrawEntryRecord -[hidden]down- FanOutRecord
+ItemRef -[hidden]down- Item
+
+legend right
+  <back:#FADBD8><color:#C0392B><b>  field  </b></color></back> system value (SV_DispatchGrid): sizes the consumer's dispatch grid
+  <back:#D6EAF8><color:#1F618D><b>  field  </b></color></back> indexes a buffer (DXIL dataflow)
+  <back:#EBDEF0><color:#6C3483><b>  field  </b></color></back> affects an output allocation count (DXIL dataflow)
+  columns: size and offset in bytes, type, name; layout from DXIL debug info (-Zi), SV_DispatchGrid from DXIL node metadata;
+  (DXIL) = inferred from the compiled shaders
+endlegend
+@enduml

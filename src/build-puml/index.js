@@ -27,6 +27,8 @@ const { readIrFile } = require('../common/ir');
 const { computeDepths } = require('./graph');
 const { renderPlantUml } = require('./document');
 const { SPECS, resolveOpts } = require('./options');
+const { loadPlan, analysePlan } = require('../common/dispatch-plan');
+const { renderDispatchPlantUml } = require('./dispatches');
 
 function printHelp() {
     console.log(`Usage: hlsl-workgraph-diagram build-puml [inJsonFile] [outPUml] [options]
@@ -76,6 +78,32 @@ Options:
                                    parse-source's IR - see docs/ir-format.md.
   --record-out-names / --no-record-out-names
                                    Same, for "Record out:". Default: off.
+  --node-comments / --no-node-comments
+                                   Show each node's leading source comment
+                                   in its box. Default: on.
+  --line-type <spline|ortho|polyline>
+                                   Edge routing: curves (default), right
+                                   angles, or straight segments.
+  --hide-global <name>             Dispatch view: leave this resource out of
+                                   the UAV boxes and node lists (display
+                                   only; noted in the legend). Repeatable.
+  --global-fields / --no-global-fields
+                                   With parse-dxil access data, append the
+                                   element fields each global is read or
+                                   written through. Default: off.
+  --edge-record-size / --no-edge-record-size
+                                   Add the record's byte size (from DXIL) to
+                                   each edge note. Default: off.
+  --dispatches <plan.json|auto>    Render the multi-dispatch view instead:
+                                   one package per DispatchGraph call in
+                                   the plan (see docs/dispatch-plan.md),
+                                   each holding the subgraph reachable from
+                                   its entry, plus UAV boxes with the
+                                   write/atomic/read edges between them.
+                                   "auto" infers one dispatch per program
+                                   entry (order unknown) - no plan needed.
+                                   Uses the IR's optional globalAccess and
+                                   output allocation fields when present.
   --verbose, -v                    Print each node/edge/global found, and
                                     its computed depth, instead of just the
                                     summary counts.
@@ -97,6 +125,8 @@ function run(argv) {
     const outFile = path.resolve(/\.puml$/i.test(outArg) ? outArg : `${outArg}.puml`);
 
     const opts = resolveOpts(values);
+    // Repeatable: the shared parser keeps only the last value, so collect from argv.
+    opts.hideGlobals = argv.flatMap((a, i) => (a === '--hide-global' && argv[i + 1] ? [argv[i + 1]] : []));
 
     const ir = readIrFile(inFile);
     const nodes = ir.nodes || [];
@@ -120,6 +150,7 @@ function run(argv) {
                 recordKind: out.recordKind,
                 maxRecords: out.maxRecords,
                 maxRecordsSharedWith: out.maxRecordsSharedWith,
+                recordSizeBytes: out.recordSizeBytes ?? null,
             });
         }
     }
@@ -142,7 +173,17 @@ function run(argv) {
         generator: ir.generator,
         dxcVersion: (ir.generatorDetail && ir.generatorDetail.dxcVersion) || null,
     };
-    const puml = renderPlantUml(nodes, edges, externalIds, globals, opts, provenance);
+    let puml;
+    if (opts.dispatches) {
+        const plan = loadPlan(opts.dispatches === 'auto' ? 'auto' : path.resolve(opts.dispatches), nodes);
+        const analysis = analysePlan(plan, nodes, ir.recordTypes);
+        for (const d of analysis.dispatches) {
+            log.info(`dispatch ${d.id} (${d.entry}): ${d.analysis.nodeIds.length} node(s), ${d.analysis.deadIds.size} never launched.`);
+        }
+        puml = renderDispatchPlantUml(ir, plan, analysis, opts, provenance);
+    } else {
+        puml = renderPlantUml(nodes, edges, externalIds, globals, opts, provenance);
+    }
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     fs.writeFileSync(outFile, puml, 'utf8');
     log.info(`Wrote ${outFile}`);

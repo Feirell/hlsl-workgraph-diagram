@@ -1,0 +1,46 @@
+@startuml RecordLayouts
+hide empty methods
+hide circle
+skinparam classAttributeIconSize 0
+skinparam classFontStyle bold
+skinparam classAttributeFontName monospaced
+skinparam classAttributeFontSize 11
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #5D6D7E
+  BackgroundColor<<cpu-entry-record>> #E8F8F5
+  BackgroundColor<<node-record>> #EBF5FB
+  BackgroundColor<<buffer-element>> #FEF9E7
+  BackgroundColor<<nested>> #F4F6F6
+}
+skinparam packageStyle rectangle
+
+package "Node records (graph edges)" {
+  class DispatchRecord <<node-record>> {
+    {field} <size:10><color:#5D6D7E>4 B</color></size>
+    ==
+    {field} <color:#7F8C8D> size offset  type           name</color>
+    {field}     4      0  uint           objectCount
+    ..
+    {field} <size:10><i>produced by EntryNode</i></size>
+    {field} <size:10><i>consumed by CullNode</i></size>
+  }
+  class MeshInputRecord <<node-record>> {
+    {field} <size:10><color:#5D6D7E>16 B</color></size>
+    ==
+    {field} <color:#7F8C8D> size offset  type           name</color>
+    {field} <back:#FADBD8><color:#C0392B><b>   12      0  uint3          DispatchGrid</b></color></back>
+    {field}               <size:9><color:#C0392B>SV_DispatchGrid (DXIL metadata)</color></size>
+    {field}     4     12  uint           objectIndex
+    ..
+    {field} <size:10><i>produced by CullNode</i></size>
+    {field} <size:10><i>consumed by RenderMeshNode</i></size>
+  }
+}
+
+legend right
+  <back:#FADBD8><color:#C0392B><b>  field  </b></color></back> system value (SV_DispatchGrid): sizes the consumer's dispatch grid
+  columns: size and offset in bytes, type, name; layout from DXIL debug info (-Zi), SV_DispatchGrid from DXIL node metadata;
+  (DXIL) = inferred from the compiled shaders
+endlegend
+@enduml

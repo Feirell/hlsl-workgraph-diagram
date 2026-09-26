@@ -55,3 +55,20 @@ path, and, for `parse-dxil`, the exact `dxc` version used.)
 | `parse-source` | `parse-dxil` |
 | --- | --- |
 | ![simple-pipeline via parse-source](gen/work-graph.source.png) | ![simple-pipeline via parse-dxil](gen/work-graph.dxil.png) |
+
+## Record layouts (`parse-dxil` + `build-records`)
+
+The record struct layouts need the `parse-dxil` IR's `recordTypes`, which the committed
+`work-graph.dxil.ir.json` above predates, so they come from a separate, freshly parsed IR:
+
+```sh
+# from examples/simple-pipeline/
+node ../../generate-workgraph-diagram.js parse-dxil src/WorkGraph.hlsl gen/records.ir.json --dxc-version mesh --paths-relative-to .
+node ../../generate-workgraph-diagram.js build-records gen/records.ir.json gen/records.puml
+node ../../generate-workgraph-diagram.js puml-render gen/records.puml --jar path/to/plantuml.jar --scale 1
+```
+
+![simple-pipeline record layouts](gen/records.png)
+
+Both records are 4-byte node records: `WorkItemRecord` from `EntryNode` to `GenerateNode`, `ResultRecord` from `GenerateNode` to the coalescing `CollectNode`. Rows read `size offset type name`, in bytes. `gen/records.*` was produced with the Linux dxc
+`libdxcompiler.so: 1.9(dev;4480-cfc8ba0c)` and PlantUML 1.2026.8.

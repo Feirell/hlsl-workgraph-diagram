@@ -50,4 +50,14 @@ function readIrFile(filePath) {
     return parsed;
 }
 
-module.exports = { IR_VERSION, writeIrFile, readIrFile };
+// Rewrites the source paths an IR records (entry file, node source files, record type files) relative to
+// baseDir, so an IR can be committed or moved without depending on where the tree was checked out.
+function relativizeIrPaths(ir, baseDir) {
+    const rel = (p) => (typeof p === 'string' && path.isAbsolute(p) ? path.relative(baseDir, p).split(path.sep).join('/') : p);
+    if (ir.generatorDetail) ir.generatorDetail.entryFile = rel(ir.generatorDetail.entryFile);
+    for (const n of ir.nodes || []) n.sourceFile = rel(n.sourceFile);
+    for (const t of Object.values(ir.recordTypes || {})) t.file = rel(t.file);
+    return ir;
+}
+
+module.exports = { IR_VERSION, writeIrFile, readIrFile, relativizeIrPaths };

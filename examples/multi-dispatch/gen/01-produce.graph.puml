@@ -1,0 +1,68 @@
+@startuml WorkGraphDependencies
+hide empty description
+skinparam DefaultFontColor #1A1A1A
+skinparam ArrowColor #555555
+skinparam ArrowFontColor #333333
+skinparam NoteBackgroundColor #FBFBFB
+skinparam NoteBorderColor #999999
+skinparam NoteBorderThickness 1
+skinparam NoteFontSize 9
+skinparam NoteFontColor #1A1A1A
+skinparam PackageBorderColor #555555
+skinparam PackageFontColor #1A1A1A
+skinparam LegendBorderColor #555555
+skinparam LegendFontColor #1A1A1A
+skinparam LegendFontSize 11
+skinparam rectangle {
+    RoundCorner 12
+    BorderColor #555555
+    BackgroundColor<<broadcasting>> #CFE8FF
+    BackgroundColor<<coalescing>> #FFF3B0
+    BackgroundColor<<thread>> #D9F2D9
+    BackgroundColor<<mesh>> #F5CFEA
+    BackgroundColor<<unknown>> #EEEEEE
+    BackgroundColor<<external>> #F2F2F2
+    BorderColor<<entry>> #C0392B
+    BorderThickness<<entry>> 3
+    BorderStyle<<external>> dashed
+    BorderStyle<<multi>> dashed
+}
+
+package "other" {
+    rectangle "<color:#1A5276>EmitNode</color>\n\n<i><size:9>Depth: 0 | Grid: (4, <color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>) | Threads: (64, <color:#8A8A8A>1</color>, <color:#8A8A8A>1</color>)</size></i>\n\n<i><size:10>Globals read only:</size></i>\n<i><size:10>  <color:#8A6D3B>config</color> (t0) <color:#8A8A8A><<Config>></color></size></i>\n<i><size:10>Record out:</size></i>\n<i><size:10>  <color:#8E44AD><<ItemRecord>></color> (64)</size></i>" as EmitNode <<broadcasting>> <<entry>> <<multi>>
+    rectangle "<color:#1A5276>StoreNode</color>\n\n<i><size:9>Depth: 1</size></i>\n\n<i><size:10>Record in:</size></i>\n<i><size:10>  <color:#8E44AD><<ItemRecord>></color></size></i>\n<i><size:10>Globals written:</size></i>\n<i><size:10>  <color:#8A6D3B>counters</color> (u1) <color:#8A8A8A><<uint>></color> (atomic add)</size></i>\n<i><size:10>  <color:#8A6D3B>items</color> (u0) <color:#8A8A8A><<Item>></color></size></i>" as StoreNode <<thread>>
+}
+
+EmitNode --> StoreNode
+note on link
+  <i><color:#8E44AD><<ItemRecord>></color></i> (64)
+  <size:8>itemOutput</size>
+end note
+
+legend right
+  Global resources:
+  |  Identifier  |  Slot  |  Kind  |  Value type  |  Used?  |
+  |  <b><color:#8A6D3B>config</color></b>  |  t0  |  StructuredBuffer  |  Config  |  ✓  |
+  |  <b><color:#8A6D3B>items</color></b>  |  u0  |  RWStructuredBuffer  |  Item  |  ✓  |
+  |  <b><color:#8A6D3B>counters</color></b>  |  u1  |  RWStructuredBuffer  |  uint  |  ✓  |
+  
+  Register slot prefixes:
+  t<NR> := SRV (shader resource view) - read-only buffer/texture
+  u<NR> := UAV (unordered access view) - read-write buffer/texture
+  b<NR> := CBV (constant buffer view) - small constant-buffer data
+  s<NR> := sampler state
+  
+  |  Color  |  Launch mode  |
+  |  <#CFE8FF>  |  broadcasting  |
+  |  <#FFF3B0>  |  coalescing  |
+  |  <#D9F2D9>  |  thread  |
+  |  <#F5CFEA>  |  mesh  |
+  |  <#F2F2F2>  |  external / unresolved reference  |
+  Red border = graph entry point (NodeIsProgramEntry)
+  Dashed border = grid can expand to >1 thread group per invocation
+  (NodeMaxDispatchGrid, or NodeDispatchGrid != (1,1,1)); solid border = always
+  exactly one group (NodeDispatchGrid(1,1,1), thread launch, or coalescing)
+  <size:7><color:#8A8A8A>hlsl-workgraph-diagram v2.2.0 · dxil parsing</color></size>
+  <size:7><color:#8A8A8A>dxc: libdxcompiler.so: 1.9(dev;4480-cfc8ba0c)</color></size>
+endlegend
+@enduml

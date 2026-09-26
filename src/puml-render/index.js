@@ -7,6 +7,8 @@
 // ---------------------------------------------------------------------------
 'use strict';
 
+const { renderWithLocalJar } = require('./local-jar');
+
 // ---------------------------------------------------------------------------
 // `hlsl-workgraph-diagram puml-render [pUmlFile] [options]`
 //
@@ -48,6 +50,9 @@ Options:
                           Raises the rendered .png's pixel resolution
                           proportionally; .svg is vector, so this mainly
                           affects its declared width/height. Default: 2.
+  --jar <plantuml.jar>    Render locally with this jar (java + Graphviz)
+                          instead of a server; nothing leaves the machine.
+                          Fails on a PlantUML syntax error.
   --server <url>          PlantUML server base URL.
                            Default: https://www.plantuml.com/plantuml
   --verbose, -v           Print the exact request URLs, retry attempts, and
@@ -75,6 +80,7 @@ async function run(argv) {
     const { values, positionals, help } = parseArgs(argv, [
         { name: 'scale', flag: '--scale', type: 'number', default: 2 },
         { name: 'server', flag: '--server', type: 'string', default: 'https://www.plantuml.com/plantuml' },
+        { name: 'jar', flag: '--jar', type: 'string', default: null },
         VERBOSE_SPEC,
     ]);
     if (help) {
@@ -94,6 +100,16 @@ async function run(argv) {
     }
 
     const puml = withScale(fs.readFileSync(inFile, 'utf8'), scale);
+    if (values.jar) {
+        try {
+            renderWithLocalJar(puml, outBase, path.resolve(values.jar.replace(/^~(?=\/)/, require('os').homedir())), log);
+            log.info(`Rendered ${outBase}.png and ${outBase}.svg with ${values.jar}`);
+        } catch (err) {
+            log.info(`Error: local PlantUML rendering failed: ${err.message}`);
+            process.exitCode = 1;
+        }
+        return;
+    }
     try {
         await renderWithPlantumlServer(puml, outBase, server, log);
         log.info(`Rendered ${outBase}.png and ${outBase}.svg via ${server}`);

@@ -1,0 +1,10 @@
+{
+  "source": "src/WorkGraph.hlsl",
+  "compile": { "profile": "lib_6_8", "defines": [] },
+  "diagram": { "lineType": "spline", "short": true, "nodeComments": false },
+  "dispatches": [
+    { "name": "produce", "entry": "EmitNode" },
+    { "name": "consume-color", "entry": "DrawEntryNode", "entryRecord": { "pass": 0 } },
+    { "name": "consume-stats", "entry": "DrawEntryNode", "entryRecord": { "pass": 1 }, "defines": ["WITH_STATS=1"] }
+  ]
+}

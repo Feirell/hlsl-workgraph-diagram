@@ -181,11 +181,62 @@ function buildGlobalsUsedLines(n, globalsByName, theme, globalListEnabled) {
     const valueLines = n.globalsUsed.map((name) => {
         const g = globalsByName.get(name) || { name };
         const identSpan = `<color:${theme.globalHighlight}>${pumlEscape(g.name)}</color>`;
-        const regText = g.regType != null && g.regSlot != null ? `${g.regType}${g.regSlot}` : '?';
+        const regText = g.regType != null && g.regSlot != null ? `${g.regType}${g.regSlot}${g.space ? `, space${g.space}` : ''}` : '?';
         const typeSpan = g.valueType ? ` <color:${theme.greyOne}><<${pumlEscape(g.valueType)}>></color>` : '';
         return smallItalicLine(`  ${identSpan} (${regText})${typeSpan}`);
     });
     return [smallItalicLine('Globals used:'), ...valueLines].join('\\n');
+}
+
+// With per-resource access from the DXIL (parse-dxil's globalAccess): "Globals read" lists what the node
+// ONLY reads; "Globals written" lists everything it writes, tagged when it also reads or writes atomically.
+// --global-fields appends the element fields touched (from dataflow), folded to top level.
+function buildGlobalsAccessLines(n, globalsByName, theme, opts, which) {
+    if (!opts.globalListEnabled || !n.globalAccess) return null;
+    const res = (n.dataflow && n.dataflow.resources) || {};
+    const writes = (parts) => parts.includes('write') || parts.includes('atomic');
+    const entries = Object.entries(n.globalAccess).filter(([, label]) => {
+        const parts = label.split('+');
+        return which === 'read' ? !writes(parts) : writes(parts);
+    });
+    if (!entries.length) return null;
+    const lines = entries.map(([name, label]) => {
+        const g = globalsByName.get(name) || { name };
+        const identSpan = `<color:${theme.globalHighlight}>${pumlEscape(g.name)}</color>`;
+        const regText = g.regType != null && g.regSlot != null ? `${g.regType}${g.regSlot}${g.space ? `, space${g.space}` : ''}` : '?';
+        const typeSpan = g.valueType ? ` <color:${theme.greyOne}><<${pumlEscape(g.valueType)}>></color>` : '';
+        const parts = label.split('+');
+        const tags = [];
+        if (which === 'read' && !parts.includes('read') && parts.includes('query')) tags.push('size only');
+        if (which === 'write') {
+            if (parts.includes('read')) tags.push('read');
+            if (parts.includes('write')) tags.push('write');
+            if (parts.includes('atomic')) {
+                const ops = (res[name] && res[name].atomicOps) || [];
+                tags.push(`atomic${ops.length ? ` ${ops.join('/')}` : ''}`);
+            }
+            if (g.globallyCoherent) tags.push('globallycoherent');
+        }
+        const note = tags.length && !(which === 'write' && tags.length === 1 && tags[0] === 'write') ? ` (${tags.join(' + ')})` : '';
+        let fields = '';
+        if (opts.globalFields && res[name]) {
+            const kinds = which === 'read' ? ['read'] : ['write', 'atomic'];
+            const names = Object.entries(res[name].fields)
+                .filter(([, k]) => k.some((x) => kinds.includes(x)))
+                .map(([f]) => f.replace(/\[\d+\]/g, '[]'));
+            if (names.length) fields = ` <color:${theme.greyOne}>${pumlEscape([...new Set(names)].join(' '))}</color>`;
+        }
+        return smallItalicLine(`  ${identSpan} (${regText})${typeSpan}${pumlEscape(note)}${fields}`);
+    });
+    return [smallItalicLine(which === 'read' ? 'Globals read only:' : 'Globals written:'), ...lines].join('\\n');
+}
+
+// Barriers the compiled function executes (DXIL), e.g. GroupMemoryBarrierWithGroupSync.
+function buildBarrierLine(n, opts) {
+    const b = n.dataflow && n.dataflow.barriers;
+    if (!opts.globalListEnabled || !b || !b.length) return null;
+    const text = b.map((x) => [x.resource, ...(x.flags || []), ...(x.memory || []), ...(x.semantics || [])].filter(Boolean).join('+')).join('; ');
+    return smallItalicLine(`Barriers: ${pumlEscape(text)}`);
 }
 
 function buildInputRecordLine(n, theme, shortRecordInCount, recordInNamesEnabled) {
@@ -251,8 +302,11 @@ function buildLabel(n, grid, theme, globalsByName, opts) {
     let label = `${nameLine}\\n\\n${meta}`;
 
     const recordBlock = [
-        buildGlobalsUsedLines(n, globalsByName, theme, opts.globalListEnabled),
+        n.globalAccess ? null : buildGlobalsUsedLines(n, globalsByName, theme, opts.globalListEnabled),
+        buildGlobalsAccessLines(n, globalsByName, theme, opts, 'read'),
         buildInputRecordLine(n, theme, opts.shortRecordInCount, opts.recordInNamesEnabled),
+        buildGlobalsAccessLines(n, globalsByName, theme, opts, 'write'),
+        buildBarrierLine(n, opts),
         buildOutputRecordsLines(n, theme, opts.shortRecordOutCount, opts.recordOutNamesEnabled),
     ]
         .filter(Boolean)
@@ -261,7 +315,7 @@ function buildLabel(n, grid, theme, globalsByName, opts) {
         label += `\\n\\n${recordBlock}`;
     }
 
-    if (n.comment) {
+    if (n.comment && opts.nodeComments !== false) {
         const commentText = n.comment
             .split('\n')
             .map((l) => `<size:9>${pumlEscape(l)}</size>`)
@@ -290,6 +344,7 @@ module.exports = {
     outputRecordCountBraces,
     inputRecordCountBraces,
     buildGlobalsUsedLines,
+    buildGlobalsAccessLines,
     buildInputRecordLine,
     buildOutputRecordsLines,
     greyOnes,

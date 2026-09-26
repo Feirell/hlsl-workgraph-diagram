@@ -18,6 +18,8 @@
 //   parse-dxil    HLSL source (dxc compile) -> IR JSON
 //   build-puml    IR JSON -> .puml
 //   puml-render   .puml -> .png + .svg
+//   build-records record struct layouts -> class/YAML .puml
+//   validate      spec node limits + dispatch-plan checks over an IR
 //
 // This is a breaking change from v1's single all-in-one CLI invocation
 // (`hlsl-workgraph-diagram rootDir outFile [options]`) - see the root
@@ -30,16 +32,22 @@ const COMMANDS = {
     'parse-dxil': () => require('./parse-dxil'),
     'build-puml': () => require('./build-puml'),
     'puml-render': () => require('./puml-render'),
+    validate: () => require('./validate'),
+    'build-records': () => require('./build-records'),
+    pipeline: () => require('./pipeline'),
 };
 
-const COMMAND_ORDER = ['setup-dxil', 'parse-source', 'parse-dxil', 'build-puml', 'puml-render'];
+const COMMAND_ORDER = ['pipeline', 'setup-dxil', 'parse-dxil', 'parse-source', 'build-puml', 'build-records', 'validate', 'puml-render'];
 
 const SUMMARIES = {
     'setup-dxil': 'Download and cache a dxc build for parse-dxil to use.',
     'parse-source': 'Scan HLSL source (regex/paren-balance) into the shared IR JSON.',
     'parse-dxil': 'Compile HLSL with dxc and read the shared IR JSON back out of the DXIL metadata.',
     'build-puml': 'Render the IR JSON as a PlantUML (.puml) diagram.',
-    'puml-render': 'Render a .puml file to .png/.svg via a PlantUML server.',
+    'puml-render': 'Render a .puml file to .png/.svg with a local plantuml.jar (--jar) or a PlantUML server.',
+    pipeline: 'Run everything over a list of dispatch definitions (entry, entry record, #defines).',
+    'build-records': 'Render the record struct layouts (parse-dxil IR) as a PlantUML class or YAML diagram.',
+    validate: 'Check an IR against the spec node limits, and a dispatch plan for reachability and UAV hazards.',
 };
 
 function printTopHelp() {
@@ -52,16 +60,20 @@ ${COMMAND_ORDER.map((c) => `  ${c.padEnd(14)} ${SUMMARIES[c]}`).join('\n')}
 Run "hlsl-workgraph-diagram <command> --help" for a command's own arguments
 and options.
 
-A typical pipeline:
+Recommended: dispatch definitions (see docs/pipeline.md) -> every diagram + validation:
+  hlsl-workgraph-diagram setup-dxil mesh
+  hlsl-workgraph-diagram pipeline workgraph.config.json out/ --jar plantuml.jar
+
+Or step by step with the dxc-based parser:
+  hlsl-workgraph-diagram parse-dxil ./shaders/WorkGraph.hlsl graph.ir.json
+  hlsl-workgraph-diagram build-puml graph.ir.json graph.puml
+  hlsl-workgraph-diagram build-records graph.ir.json records.puml
+  hlsl-workgraph-diagram validate graph.ir.json
+  hlsl-workgraph-diagram puml-render graph.puml --jar plantuml.jar
+
+Or topology only, with the regex scanner (no dxc needed):
   hlsl-workgraph-diagram parse-source ./shaders work-graph.ir.json
   hlsl-workgraph-diagram build-puml work-graph.ir.json work-graph.puml
-  hlsl-workgraph-diagram puml-render work-graph.puml
-
-Or, using the dxc-based parser instead of the regex scanner:
-  hlsl-workgraph-diagram setup-dxil
-  hlsl-workgraph-diagram parse-dxil ./shaders/WorkGraph.hlsl work-graph.ir.json
-  hlsl-workgraph-diagram build-puml work-graph.ir.json work-graph.puml
-  hlsl-workgraph-diagram puml-render work-graph.puml
 `);
 }
 

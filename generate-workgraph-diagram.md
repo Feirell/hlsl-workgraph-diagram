@@ -14,7 +14,7 @@ for the JSON shape the two parsers agree on.
 
 ## Module layout
 
-Five independent commands, each its own directory under `src/`, dispatched by `src/cli.js`
+Eight commands, each its own directory under `src/`, dispatched by `src/cli.js`
 (`generate-workgraph-diagram.js` at the repo root is just the bin entry: `require('./src/cli.js').main(...)`).
 `src/common/` holds what's shared across more than one of them.
 
@@ -24,7 +24,10 @@ Five independent commands, each its own directory under `src/`, dispatched by `s
 | `src/parse-dxil/` | `dxc` compile of HLSL -> IR JSON | `src/common/`, `src/setup-dxil/paths.js` + `fetch.js` (to locate a cached `dxc` by alias/version) |
 | `src/setup-dxil/` | Fetches/caches a `dxc` build for `parse-dxil` | `src/common/` |
 | `src/build-puml/` | IR JSON -> `.puml` (all rendering/display logic + node-depth computation) | `src/common/` |
-| `src/puml-render/` | `.puml` -> `.png`/`.svg` via a PlantUML server | `src/common/` |
+| `src/build-records/` | IR `recordTypes` -> record-layout `.puml` (class or YAML) | `src/common/` |
+| `src/validate/` | IR (+ dispatch plan, inventory, annotations) -> PASS/WARN/FAIL report | `src/common/` |
+| `src/pipeline/` | Dispatch-definition config -> compile(s), per-dispatch IR/diagrams, frame, validation | `src/parse-dxil/` (in-process), the other commands (as child processes) |
+| `src/puml-render/` | `.puml` -> `.png`/`.svg` via a PlantUML server or a local `plantuml.jar` | `src/common/` |
 
 Within `src/common/`: `text-utils.js` (string/paren helpers: `splitTopLevel`, `findMatchingParen`/`Brace`,
 `pumlEscape`, `unquote`, `escapeRegExp` - shared by `parse-source` and `build-puml`), `themes.js`
@@ -32,7 +35,10 @@ Within `src/common/`: `text-utils.js` (string/paren helpers: `splitTopLevel`, `f
 command's own CLI module uses, plus `VERBOSE_SPEC` - the shared `--verbose`/`-v` flag definition every
 command includes in its own spec list), `logger.js` (`createLogger(verboseEnabled)` -> `{info, verbose}`;
 `info()` is the terse default-mode summary, `verbose()` only prints under `--verbose` - per-item detail and
-the exact system commands issued), `ir.js` (`IR_VERSION`, `writeIrFile()`/`readIrFile()`).
+the exact system commands issued), `ir.js` (`IR_VERSION`, `writeIrFile()`/`readIrFile()`), `dispatch-plan.js`
+(loading a dispatch plan - or `auto` - and the per-dispatch analysis shared by `build-puml --dispatches` and
+`validate`: reachable subgraph, statically dead edges, per-dispatch UAV access, entry-record impact), and
+`ir-subset.js` (`subsetIr()`: the part of an IR one dispatch uses, for the pipeline's per-dispatch IRs).
 
 Each command directory has its own `index.js` (the `run(argv)` entry `cli.js` calls, plus `--help` text)
 and, where relevant, its own `options.js` (flag definitions + derivation, `build-puml`'s is the interesting
@@ -372,6 +378,66 @@ re-rendered at a different scale without regenerating it. Still deliberately the
 silently break diagram-type autodetection (`HTTP 400`, "Assumed diagram type: sequence" / "Syntax Error?",
 with no warning from `fetchBinary()` since the response is still a real, non-empty `image/*`-adjacent
 error). Never reintroduce the percentage form here.
+
+## `parse-dxil`: the analysis modules
+
+Three modules add what the compiled code, rather than the metadata, knows. All read the `-Fc` disassembly text
+of one node function (`extractFunctionBody()`), and all are conservative: an operand they cannot classify is
+left out rather than guessed.
+
+- **`resource-access.js`** - `findGlobalAccess()`: per resource, `read`/`write`/`atomic`/`query`, by following
+  handle SSA values (`load @global` -> `createHandleForLib` -> `annotateHandle` -> the `dx.op` using it; phi/select
+  of two handles attributes both). `findOutputAllocations()`: every `allocateNodeOutputRecords` count per output
+  (all literal 0 = dead edge). `findGroupSharedBytes()`: sizes the addrspace(3) globals a function references,
+  with a small LLVM type sizer.
+- **`record-layouts.js`** - struct layouts from `DICompositeType`/`DIDerivedType` debug info (offsets, sizes,
+  array counts, nested structs, typedef names such as `uint3`), SV_DispatchGrid and IO flags from the node
+  metadata, field comments and `: SV_*` text from the embedded source by line number.
+- **`dataflow.js`** - `analyseFunction()`: a fixed-point source analysis. Every SSA value gets a set of sources
+  (`in:Type.field`, `buf:resource.field`, `sv:SV_*`, `const:n`, `dim:resource`, `local`); record pointers are
+  followed from `createNodeInputRecordHandle`/`allocateNodeOutputRecords` through `getNodeRecordPtr` and
+  `getelementptr` to field paths (via `fieldPath()` against the debug-info layout); buffer element offsets map to
+  element fields (`fieldAtOffset()`). Sinks: buffer index operands, stored values, output record fields,
+  allocation counts, `br`/`switch` conditions. `to-ir.js`'s `attachFieldDataflow()` aggregates the per-node
+  results per record field (readBy, writtenBy, sources, indexes incl. one hop via a copied field, sizesOutputs,
+  controls, flowsTo), attributing a nested path to every struct level along it.
+
+Gotchas already hit here, do not reintroduce:
+
+1. **Take the pointer operand by argument position, not by the first `%` token.** `getelementptr`, `load` and
+   `store` all start with a type such as `%struct.QuadBatchRecord.18`; a regex for "the first `%name`" returns
+   the type. Split the argument list at top level (`splitArgs()`) and take the right argument.
+2. **A matrix-bearing buffer is not a `%dx.types.Handle` load.** dxc loads it as its `%"hostlayout.class...."`
+   type and calls a *quoted* overload, `@"dx.op.createHandleForLib.hostlayout..."(...)`. Both tracers accept the
+   hostlayout type and a quoted `dx.op` name; before that fix, every access to a `float4x4` buffer was missing.
+3. **Every buffer op takes its handle as argument 1** (`atomicBinOp(opcode, handle, atomicOp, index, offset,
+   ..., newValue)` included); the index and offset positions differ per op.
+4. **LLVM prints float constants as the hex bits of a double** (`0x3FC99999A0000000`); `constLabel()` decodes them.
+5. **Several fields can share one source line** (a one-line struct). The `: SV_*` match is anchored on the
+   field's own name, and a trailing comment only belongs to a field whose line declares nothing else.
+
+## `build-puml --dispatches`, `build-records`, `validate`, `pipeline`
+
+- **`build-puml/dispatches.js`** renders the frame: one package per dispatch (each dispatch may carry its own
+  IR, so nodes are looked up in `d.nodesById`), one box per touched UAV with write/atomic/read edges, a plan's
+  attachment flows as bold purple edges, and a legend line naming exactly which plan fields were used.
+  Aliases are `<dispatchId>__<nodeId>` because a node appears once per dispatch.
+- **`build-records/index.js`** builds rows (fields plus computed padding) with a highlight kind in priority
+  order semantic > index > sizing > control > annotation > unread, and renders them. PlantUML strips leading
+  ASCII spaces from a class member line, so column padding uses NO-BREAK SPACE; a YAML highlight path uses `/` as
+  its separator, so `/` is removed from YAML keys. Groups are laid out as a grid with hidden links
+  (`--columns`), because Graphviz otherwise puts every box of a package in one row.
+- **`validate/index.js`**: each check family is one function (`checkEdges`, `checkNodeLimits`,
+  `checkRecordTypes`, `checkFieldDataflow`, `checkPlan` -> `checkEntryRecord`/`checkUavFlow`/
+  `checkAttachmentFlows`/`checkRules`, `checkInventory`). The field-written check compares element/component
+  paths (`coverage()`), and is deliberately described as "stored on some path" - it is not path-sensitive.
+- **`pipeline/index.js`** compiles in-process (one `compileToDisassembly()` + `buildIr()` per distinct define
+  set), rewrites source paths relative to the config, cuts per-dispatch IRs with `subsetIr()`, and runs the other
+  commands as child processes of the same CLI, so every output is exactly what the standalone command would
+  write.
+- **`puml-render/local-jar.js`** renders with `java -jar plantuml.jar` into a temp directory (PlantUML names its
+  output after the `@start` line's diagram name, not the input file), copies the result to `<file>.svg/.png`,
+  and fails if the SVG contains PlantUML's drawn-in "syntax error".
 
 ## Known limitations (read before extending)
 

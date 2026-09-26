@@ -29,7 +29,7 @@ const path = require('path');
 
 const { parseArgs, VERBOSE_SPEC } = require('../common/cli-args');
 const { createLogger } = require('../common/logger');
-const { writeIrFile } = require('../common/ir');
+const { writeIrFile, relativizeIrPaths } = require('../common/ir');
 const { compileToDisassembly } = require('./run-dxc');
 const { loadDisassembly, makeResolver } = require('./disassembly');
 const { buildIr } = require('./to-ir');
@@ -69,6 +69,16 @@ Options:
                         Use the dxc version "setup-dxil" installed under
                         this name/version (see "hlsl-workgraph-diagram
                         setup-dxil list"). Ignored if --dxc is also given.
+  --profile <lib_6_N>   dxc target profile. Default: lib_6_8 (the minimum
+                        for work graphs). Pass the profile your app
+                        compiles with (e.g. lib_6_9) so the IR describes
+                        the same DXIL the runtime sees.
+  --dxc-arg <arg>       Extra argument passed to dxc verbatim (e.g.
+                        -enable-16bit-types, -HV 2021). Repeatable; one
+                        token per flag.
+  --paths-relative-to <dir>
+                        Write source paths in the IR relative to this
+                        directory instead of absolute (for committing IRs).
   --keep-intermediate   Keep the compiled .dxil container and -Fc
                         disassembly (<stem>.dxil / <stem>.dis.ll) in the
                         current working directory instead of a throwaway
@@ -96,6 +106,9 @@ function run(argv) {
         { name: 'dxcVersion', flag: '--dxc-version', type: 'string', default: null },
         { name: 'keepIntermediate', flag: '--keep-intermediate', type: 'boolean', default: false },
         { name: 'fromDisassembly', flag: '--from-disassembly', type: 'string', default: null },
+        { name: 'profile', flag: '--profile', type: 'string', default: 'lib_6_8' },
+        { name: 'dxcArg', flag: '--dxc-arg', type: 'string', default: null, repeatable: true },
+        { name: 'pathsRelativeTo', flag: '--paths-relative-to', type: 'string', default: null },
         VERBOSE_SPEC,
     ]);
     if (help) {
@@ -108,9 +121,11 @@ function run(argv) {
     // last value per flag - re-scan argv here for the repeatable ones.
     const defines = [];
     const exportNames = [];
+    const extraArgs = [];
     for (let i = 0; i < argv.length; i++) {
         if (argv[i] === '--define') defines.push(argv[++i]);
         else if (argv[i] === '--entry') exportNames.push(argv[++i]);
+        else if (argv[i] === '--dxc-arg') extraArgs.push(argv[++i]);
     }
 
     // entryHLSLFile is meaningless with --from-disassembly (there's no
@@ -136,6 +151,8 @@ function run(argv) {
             defines,
             exportNames,
             keepIntermediate: values.keepIntermediate,
+            profile: values.profile,
+            extraArgs,
             logger: log,
         }));
         log.verbose(`dxc version: ${dxcVersion || '(unknown)'}`);
@@ -147,6 +164,8 @@ function run(argv) {
         fromDisassembly: values.fromDisassembly ? path.resolve(values.fromDisassembly) : null,
         defines,
         exportNames,
+        profile: values.fromDisassembly ? null : values.profile,
+        extraArgs: values.fromDisassembly ? [] : extraArgs,
         dxcExe,
         dxcVersion,
     });
@@ -158,6 +177,7 @@ function run(argv) {
     }
     log.info(`Parsed ${ir.nodes.length} node(s), ${ir.globals.length} global resource(s) from the compiled DXIL.`);
 
+    if (values.pathsRelativeTo) relativizeIrPaths(ir, path.resolve(values.pathsRelativeTo));
     writeIrFile(outFile, ir);
     log.info(`Wrote ${outFile}`);
 }

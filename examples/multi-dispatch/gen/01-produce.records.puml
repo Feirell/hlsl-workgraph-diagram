@@ -1,0 +1,61 @@
+@startuml RecordLayouts
+hide empty methods
+hide circle
+skinparam classAttributeIconSize 0
+skinparam classFontStyle bold
+skinparam classAttributeFontName monospaced
+skinparam classAttributeFontSize 11
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #5D6D7E
+  BackgroundColor<<cpu-entry-record>> #E8F8F5
+  BackgroundColor<<node-record>> #EBF5FB
+  BackgroundColor<<buffer-element>> #FEF9E7
+  BackgroundColor<<nested>> #F4F6F6
+}
+skinparam packageStyle rectangle
+
+package "Node records (graph edges)" {
+  class ItemRecord <<node-record>> {
+    {field} <size:10><color:#5D6D7E>16 B</color></size>
+    ==
+    {field} <color:#7F8C8D> size offset  type           name</color>
+    {field}    12      0  float3         position
+    {field}     4     12  uint           kind
+    ..
+    {field} <size:10><i>produced by EmitNode</i></size>
+    {field} <size:10><i>consumed by StoreNode</i></size>
+  }
+}
+package "Buffer element types (StructuredBuffer, RWStructuredBuffer)" {
+  class Config <<buffer-element>> {
+    {field} <size:10><color:#5D6D7E>8 B</color></size>
+    ==
+    {field} <color:#7F8C8D> size offset  type           name</color>
+    {field} <back:#EBDEF0><color:#6C3483><b>    4      0  uint           itemsPerGroup</b></color></back>
+    {field}               <size:9><color:#6C3483>count of → StoreNode (DXIL)</color></size>
+    {field}     4      4  float          scale
+    ..
+    {field} <size:10><i>element of config</i></size>
+  }
+  class Item <<buffer-element>> {
+    {field} <size:10><color:#5D6D7E>16 B</color></size>
+    ==
+    {field} <color:#7F8C8D> size offset  type           name</color>
+    {field} <back:#FFFFFF><color:#95A5A6><b>   12      0  float3         position</b></color></back>
+    {field}               <size:9><color:#95A5A6>never read by a node</color></size>
+    {field} <back:#FFFFFF><color:#95A5A6><b>    4     12  uint           kind</b></color></back>
+    {field}               <size:9><color:#95A5A6>never read by a node</color></size>
+    ..
+    {field} <size:10><i>element of items</i></size>
+  }
+}
+ItemRecord -[hidden]down- Config
+
+legend right
+  <back:#EBDEF0><color:#6C3483><b>  field  </b></color></back> affects an output allocation count (DXIL dataflow)
+  <back:#FFFFFF><color:#95A5A6><b>  field  </b></color></back> written but never read by any node (DXIL dataflow)
+  columns: size and offset in bytes, type, name; layout from DXIL debug info (-Zi), SV_DispatchGrid from DXIL node metadata;
+  (DXIL) = inferred from the compiled shaders
+endlegend
+@enduml
