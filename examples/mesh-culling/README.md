@@ -70,3 +70,20 @@ path, and, for `parse-dxil`, the exact `dxc` version used.)
 
 Look for the `objects` database box (top-left of the `parse-source` render, feeding `CullNode`) - and its
 absence on the `parse-dxil` side.
+
+## Record layouts (`parse-dxil` + `build-records`)
+
+The record struct layouts need the `parse-dxil` IR's `recordTypes`, which the committed
+`work-graph.dxil.ir.json` above predates, so they come from a separate, freshly parsed IR:
+
+```sh
+# from examples/mesh-culling/
+node ../../generate-workgraph-diagram.js parse-dxil src/WorkGraph.hlsl gen/records.ir.json --dxc-version mesh --paths-relative-to .
+node ../../generate-workgraph-diagram.js build-records gen/records.ir.json gen/records.puml
+node ../../generate-workgraph-diagram.js puml-render gen/records.puml --jar path/to/plantuml.jar --scale 1
+```
+
+![mesh-culling record layouts](gen/records.png)
+
+`MeshInputRecord` (16 bytes) carries the mesh node's runtime dispatch grid: its `DispatchGrid` field is highlighted as the SV_DispatchGrid, read from the DXIL node metadata rather than from the source text. Rows read `size offset type name`, in bytes. `gen/records.*` was produced with the Linux dxc
+`libdxcompiler.so: 1.9(dev;4480-cfc8ba0c)` and PlantUML 1.2026.8.

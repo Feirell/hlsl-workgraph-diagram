@@ -43,7 +43,8 @@ node generate-workgraph-diagram.js puml-render graph.puml --jar plantuml.jar    
 **Verifying a change**: there's no automated test suite. Validate by running the real commands against:
 - `examples/simple-pipeline/` and `examples/mesh-culling/` - each `README.md` has the exact reproduction commands
   (check them for non-default flags like `--global-boxes`). Rendering their *committed* IRs with `build-puml` must
-  give the committed `.puml` except for the version stamp;
+  give the committed `.puml` except for the version stamp. Their `gen/records.*` come from a separate fresh IR
+  (`gen/records.ir.json`, commands in each README) - regenerate and diff those too;
 - `examples/multi-dispatch/` - rerun its pipeline command (README) and diff `gen/`; its validation must stay
   0 warn / 0 fail;
 - the fixtures under `fixtures/`, each with known answers in its header comment: `dxil-parser-fixture` (edge

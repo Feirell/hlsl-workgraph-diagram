@@ -1,0 +1,409 @@
+{
+  "irVersion": 1,
+  "generator": "parse-dxil",
+  "generatorDetail": {
+    "entryFile": "src/WorkGraph.hlsl",
+    "fromDisassembly": null,
+    "defines": [],
+    "exportNames": [],
+    "profile": "lib_6_8",
+    "extraArgs": [],
+    "dxcExe": "/opt/dxc/bin/dxc",
+    "dxcVersion": "libdxcompiler.so: 1.9(dev;4480-cfc8ba0c)"
+  },
+  "nodes": [
+    {
+      "id": "CollectNode",
+      "nodeIdIndex": 0,
+      "functionName": "CollectNode",
+      "group": "nodes-compute",
+      "sourceFile": "src/nodes-compute/CollectNode.hlsl",
+      "sourceLine": 17,
+      "comment": "Gathers up to 64 ResultRecords per invocation. Terminal node - no output.",
+      "isEntry": false,
+      "launchMode": "coalescing",
+      "numThreads": {
+        "resolved": [
+          32,
+          1,
+          1
+        ],
+        "source": [
+          "COLLECT_THREADS",
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": null,
+      "maxDispatchGrid": null,
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [
+        {
+          "recordKind": "GroupNodeInputRecords",
+          "recordType": "ResultRecord",
+          "varName": "results",
+          "linkedNodeID": null,
+          "maxRecords": {
+            "resolved": 64,
+            "source": null
+          },
+          "ioFlags": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "group",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": null,
+          "recordSizeBytes": 4,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "value",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "outputs": [],
+      "meshOutputs": [],
+      "globalsUsed": [],
+      "groupSharedBytes": 0,
+      "globalAccess": {},
+      "dataflow": {
+        "inputFieldsRead": {},
+        "outputFieldsWritten": {},
+        "outputAllocationSources": {},
+        "outputAllocationKinds": {},
+        "controlSources": [],
+        "barriers": [],
+        "resources": {}
+      }
+    },
+    {
+      "id": "EntryNode",
+      "nodeIdIndex": 0,
+      "functionName": "EntryNode",
+      "group": "nodes-compute",
+      "sourceFile": "src/nodes-compute/EntryNode.hlsl",
+      "sourceLine": 18,
+      "comment": "Graph entry point: a fixed 1x1x1 broadcasting dispatch that fans out\nup to 64 work items to GenerateNode.",
+      "isEntry": true,
+      "launchMode": "broadcasting",
+      "numThreads": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "maxDispatchGrid": null,
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [],
+      "outputs": [
+        {
+          "recordKind": "NodeOutput",
+          "recordType": "WorkItemRecord",
+          "varName": "workItemOutput",
+          "linkedNodeID": {
+            "name": "GenerateNode",
+            "index": 0
+          },
+          "maxRecords": {
+            "resolved": 64,
+            "source": null
+          },
+          "allocation": {
+            "constCounts": [
+              64
+            ],
+            "dynamicCount": 0
+          },
+          "ioFlags": {
+            "input": false,
+            "output": true,
+            "readWrite": true,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": null,
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": null,
+          "recordSizeBytes": 4,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "itemId",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "meshOutputs": [],
+      "globalsUsed": [],
+      "groupSharedBytes": 0,
+      "globalAccess": {},
+      "dataflow": {
+        "inputFieldsRead": {},
+        "outputFieldsWritten": {},
+        "outputAllocationSources": {
+          "0": [
+            "const:64"
+          ]
+        },
+        "outputAllocationKinds": {
+          "0": [
+            "per-thread x64"
+          ]
+        },
+        "controlSources": [],
+        "barriers": [],
+        "resources": {}
+      }
+    },
+    {
+      "id": "GenerateNode",
+      "nodeIdIndex": 0,
+      "functionName": "GenerateNode",
+      "group": "nodes-compute",
+      "sourceFile": "src/nodes-compute/GenerateNode.hlsl",
+      "sourceLine": 15,
+      "comment": "One thread per WorkItemRecord; produces a single ResultRecord for\nCollectNode to gather.",
+      "isEntry": false,
+      "launchMode": "thread",
+      "numThreads": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": null,
+      "maxDispatchGrid": null,
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [
+        {
+          "recordKind": "ThreadNodeInputRecord",
+          "recordType": "WorkItemRecord",
+          "varName": "inputRecord",
+          "linkedNodeID": null,
+          "maxRecords": null,
+          "ioFlags": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "thread",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": null,
+          "recordSizeBytes": 4,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "itemId",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "recordKind": "NodeOutput",
+          "recordType": "ResultRecord",
+          "varName": "resultOutput",
+          "linkedNodeID": {
+            "name": "CollectNode",
+            "index": 0
+          },
+          "maxRecords": {
+            "resolved": 1,
+            "source": null
+          },
+          "allocation": {
+            "constCounts": [
+              1
+            ],
+            "dynamicCount": 0
+          },
+          "ioFlags": {
+            "input": false,
+            "output": true,
+            "readWrite": true,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": null,
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": null,
+          "recordSizeBytes": 4,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "value",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "meshOutputs": [],
+      "globalsUsed": [],
+      "groupSharedBytes": 0,
+      "globalAccess": {},
+      "dataflow": {
+        "inputFieldsRead": {},
+        "outputFieldsWritten": {},
+        "outputAllocationSources": {
+          "0": [
+            "const:1"
+          ]
+        },
+        "outputAllocationKinds": {
+          "0": [
+            "per-thread x1"
+          ]
+        },
+        "controlSources": [],
+        "barriers": [],
+        "resources": {}
+      }
+    }
+  ],
+  "globals": [],
+  "recordTypes": {
+    "ResultRecord": {
+      "sizeBytes": 4,
+      "alignBytes": 4,
+      "file": "src/structs/Records.hlsl",
+      "line": 17,
+      "fields": [
+        {
+          "name": "value",
+          "type": "float",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 0,
+          "sizeBytes": 4,
+          "line": 19,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null
+        }
+      ],
+      "roles": [
+        "node-record"
+      ],
+      "usage": {
+        "producers": [
+          "GenerateNode"
+        ],
+        "consumers": [
+          "CollectNode"
+        ],
+        "buffers": []
+      },
+      "dxil": {
+        "recordSizeBytes": 4,
+        "alignment": 4,
+        "dispatchGridField": null,
+        "flagsByNode": {
+          "CollectNode": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "group",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          }
+        }
+      }
+    },
+    "WorkItemRecord": {
+      "sizeBytes": 4,
+      "alignBytes": 4,
+      "file": "src/structs/Records.hlsl",
+      "line": 11,
+      "fields": [
+        {
+          "name": "itemId",
+          "type": "uint",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 0,
+          "sizeBytes": 4,
+          "line": 13,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null
+        }
+      ],
+      "roles": [
+        "node-record"
+      ],
+      "usage": {
+        "producers": [
+          "EntryNode"
+        ],
+        "consumers": [
+          "GenerateNode"
+        ],
+        "buffers": []
+      },
+      "dxil": {
+        "recordSizeBytes": 4,
+        "alignment": 4,
+        "dispatchGridField": null,
+        "flagsByNode": {
+          "GenerateNode": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "thread",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          }
+        }
+      }
+    }
+  }
+}

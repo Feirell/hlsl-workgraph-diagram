@@ -1,0 +1,460 @@
+{
+  "irVersion": 1,
+  "generator": "parse-dxil",
+  "generatorDetail": {
+    "entryFile": "src/WorkGraph.hlsl",
+    "fromDisassembly": null,
+    "defines": [],
+    "exportNames": [],
+    "profile": "lib_6_8",
+    "extraArgs": [],
+    "dxcExe": "/opt/dxc/bin/dxc",
+    "dxcVersion": "libdxcompiler.so: 1.9(dev;4480-cfc8ba0c)"
+  },
+  "nodes": [
+    {
+      "id": "CullNode",
+      "nodeIdIndex": 0,
+      "functionName": "CullNode",
+      "group": "nodes-compute",
+      "sourceFile": "src/nodes-compute/CullNode.hlsl",
+      "sourceLine": 21,
+      "comment": "Reads the object buffer (no actual culling logic here - this is a\ndiagram skeleton) and emits one mesh-launch record per thread group for\nRenderMeshNode to consume.",
+      "isEntry": false,
+      "launchMode": "broadcasting",
+      "numThreads": {
+        "resolved": [
+          64,
+          1,
+          1
+        ],
+        "source": [
+          "CULL_THREADS",
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "maxDispatchGrid": null,
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [
+        {
+          "recordKind": "DispatchNodeInputRecord",
+          "recordType": "DispatchRecord",
+          "varName": "inputRecord",
+          "linkedNodeID": null,
+          "maxRecords": null,
+          "ioFlags": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "dispatch",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": null,
+          "recordSizeBytes": 4,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "objectCount",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "recordKind": "NodeOutput",
+          "recordType": "MeshInputRecord",
+          "varName": "meshOutput",
+          "linkedNodeID": {
+            "name": "RenderMeshNode",
+            "index": 0
+          },
+          "maxRecords": {
+            "resolved": 64,
+            "source": null
+          },
+          "allocation": {
+            "constCounts": [
+              1
+            ],
+            "dynamicCount": 0
+          },
+          "ioFlags": {
+            "input": false,
+            "output": true,
+            "readWrite": true,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": null,
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": {
+            "offsetBytes": 0,
+            "componentType": "uint32",
+            "count": 3
+          },
+          "recordSizeBytes": 16,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "DispatchGrid",
+              "sizeBits": 96
+            },
+            {
+              "name": "objectIndex",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "meshOutputs": [],
+      "globalsUsed": [],
+      "groupSharedBytes": 0,
+      "globalAccess": {},
+      "dataflow": {
+        "inputFieldsRead": {},
+        "outputFieldsWritten": {},
+        "outputAllocationSources": {
+          "0": [
+            "const:1"
+          ]
+        },
+        "outputAllocationKinds": {
+          "0": [
+            "per-thread x1"
+          ]
+        },
+        "controlSources": [],
+        "barriers": [],
+        "resources": {}
+      }
+    },
+    {
+      "id": "EntryNode",
+      "nodeIdIndex": 0,
+      "functionName": "EntryNode",
+      "group": "nodes-compute",
+      "sourceFile": "src/nodes-compute/EntryNode.hlsl",
+      "sourceLine": 17,
+      "comment": "Graph entry point: hands a single dispatch record to CullNode.",
+      "isEntry": true,
+      "launchMode": "broadcasting",
+      "numThreads": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": {
+        "resolved": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "maxDispatchGrid": null,
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [],
+      "outputs": [
+        {
+          "recordKind": "NodeOutput",
+          "recordType": "DispatchRecord",
+          "varName": "dispatchOutput",
+          "linkedNodeID": {
+            "name": "CullNode",
+            "index": 0
+          },
+          "maxRecords": {
+            "resolved": 1,
+            "source": null
+          },
+          "allocation": {
+            "constCounts": [
+              1
+            ],
+            "dynamicCount": 0
+          },
+          "ioFlags": {
+            "input": false,
+            "output": true,
+            "readWrite": true,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": null,
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": null,
+          "recordSizeBytes": 4,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "objectCount",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "meshOutputs": [],
+      "globalsUsed": [],
+      "groupSharedBytes": 0,
+      "globalAccess": {},
+      "dataflow": {
+        "inputFieldsRead": {},
+        "outputFieldsWritten": {},
+        "outputAllocationSources": {
+          "0": [
+            "const:1"
+          ]
+        },
+        "outputAllocationKinds": {
+          "0": [
+            "per-thread x1"
+          ]
+        },
+        "controlSources": [],
+        "barriers": [],
+        "resources": {}
+      }
+    },
+    {
+      "id": "RenderMeshNode",
+      "nodeIdIndex": 0,
+      "functionName": "RenderMeshNode",
+      "group": "nodes-mesh",
+      "sourceFile": "src/nodes-mesh/RenderMeshNode.hlsl",
+      "sourceLine": 20,
+      "comment": "Mesh-launch node: rasterizes up to 64 triangles per thread group.",
+      "isEntry": false,
+      "launchMode": "mesh",
+      "numThreads": {
+        "resolved": [
+          32,
+          1,
+          1
+        ],
+        "source": [
+          "RMN_THREADS",
+          null,
+          null
+        ]
+      },
+      "dispatchGrid": null,
+      "maxDispatchGrid": {
+        "resolved": [
+          64,
+          1,
+          1
+        ],
+        "source": [
+          null,
+          null,
+          null
+        ]
+      },
+      "maxRecursionDepth": null,
+      "outputTopology": null,
+      "inputs": [
+        {
+          "recordKind": "DispatchNodeInputRecord",
+          "recordType": "MeshInputRecord",
+          "varName": "inputRecord",
+          "linkedNodeID": null,
+          "maxRecords": null,
+          "ioFlags": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "dispatch",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          },
+          "dispatchGridField": {
+            "offsetBytes": 0,
+            "componentType": "uint32",
+            "count": 3
+          },
+          "recordSizeBytes": 16,
+          "recordAlignment": 4,
+          "maxRecordsSharedWith": null,
+          "recordFields": [
+            {
+              "name": "DispatchGrid",
+              "sizeBits": 96
+            },
+            {
+              "name": "objectIndex",
+              "sizeBits": 32
+            }
+          ]
+        }
+      ],
+      "outputs": [],
+      "meshOutputs": [],
+      "globalsUsed": [],
+      "groupSharedBytes": 0,
+      "globalAccess": {},
+      "dataflow": {
+        "inputFieldsRead": {},
+        "outputFieldsWritten": {},
+        "outputAllocationSources": {},
+        "outputAllocationKinds": {},
+        "controlSources": [],
+        "barriers": [],
+        "resources": {}
+      }
+    }
+  ],
+  "globals": [],
+  "recordTypes": {
+    "DispatchRecord": {
+      "sizeBytes": 4,
+      "alignBytes": 4,
+      "file": "src/structs/Records.hlsl",
+      "line": 18,
+      "fields": [
+        {
+          "name": "objectCount",
+          "type": "uint",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 0,
+          "sizeBytes": 4,
+          "line": 20,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null
+        }
+      ],
+      "roles": [
+        "node-record"
+      ],
+      "usage": {
+        "producers": [
+          "EntryNode"
+        ],
+        "consumers": [
+          "CullNode"
+        ],
+        "buffers": []
+      },
+      "dxil": {
+        "recordSizeBytes": 4,
+        "alignment": 4,
+        "dispatchGridField": null,
+        "flagsByNode": {
+          "CullNode": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "dispatch",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          }
+        }
+      }
+    },
+    "MeshInputRecord": {
+      "sizeBytes": 16,
+      "alignBytes": 4,
+      "file": "src/structs/Records.hlsl",
+      "line": 25,
+      "fields": [
+        {
+          "name": "DispatchGrid",
+          "type": "uint3",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 0,
+          "sizeBytes": 12,
+          "line": 27,
+          "sourceSemantic": "SV_DispatchGrid",
+          "comment": null,
+          "semantic": "SV_DispatchGrid"
+        },
+        {
+          "name": "objectIndex",
+          "type": "uint",
+          "arrayDims": [],
+          "structType": null,
+          "offsetBytes": 12,
+          "sizeBytes": 4,
+          "line": 28,
+          "sourceSemantic": null,
+          "comment": null,
+          "semantic": null
+        }
+      ],
+      "roles": [
+        "node-record"
+      ],
+      "usage": {
+        "producers": [
+          "CullNode"
+        ],
+        "consumers": [
+          "RenderMeshNode"
+        ],
+        "buffers": []
+      },
+      "dxil": {
+        "recordSizeBytes": 16,
+        "alignment": 4,
+        "dispatchGridField": {
+          "offsetBytes": 0,
+          "componentType": "uint32",
+          "count": 3
+        },
+        "flagsByNode": {
+          "RenderMeshNode": {
+            "input": true,
+            "output": false,
+            "readWrite": false,
+            "emptyRecord": false,
+            "nodeArray": false,
+            "granularity": "dispatch",
+            "trackRWInputSharing": false,
+            "globallyCoherent": false
+          }
+        }
+      }
+    }
+  }
+}

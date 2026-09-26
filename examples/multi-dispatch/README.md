@@ -34,5 +34,16 @@ node generate-workgraph-diagram.js pipeline examples/multi-dispatch/pipeline.con
 | [`gen/02-consume-color.records.svg`](gen/02-consume-color.records.svg) | Record layouts: `FanOutRecord.DispatchGrid` as SV_DispatchGrid (sourced from `counters`), `ItemRef.index` indexing `items` and `results`, `FanOutRecord.count` affecting how many `ItemRef`s `FanOutNode` emits (it also decides a branch there; the diagram shows the stronger role). |
 | [`gen/validation.txt`](gen/validation.txt) | 55 pass, 0 warn, 0 fail: spec limits, record sizes, SV_DispatchGrid, every consumer-read field written, entry records valid, `items`/`counters` read only after `produce` wrote them. |
 
+## Record layouts
+
+Each dispatch gets its own records diagram (`gen/NN-<dispatch>.records.svg`), holding the records and buffer
+element types that dispatch uses. `consume-color`:
+
+![Record layouts of the consume-color dispatch](gen/02-consume-color.records.png)
+
+Rows read `size offset type name`. Highlights are inferred from the compiled shader: `FanOutRecord.DispatchGrid`
+is the SV_DispatchGrid (red, computed from `counters`), `ItemRef.index` indexes the `items` and `results` buffers
+(blue), and `FanOutRecord.count` affects how many `ItemRef`s `FanOutNode` emits (purple).
+
 Two `compile-*.ir.json` files exist because `consume-stats` adds a define: the library is compiled once per
 distinct define set.

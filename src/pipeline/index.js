@@ -22,7 +22,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const { parseArgs } = require('../common/cli-args');
-const { writeIrFile } = require('../common/ir');
+const { writeIrFile, relativizeIrPaths } = require('../common/ir');
 const { compileToDisassembly } = require('../parse-dxil/run-dxc');
 const { makeResolver } = require('../parse-dxil/disassembly');
 const { buildIr } = require('../parse-dxil/to-ir');
@@ -86,10 +86,7 @@ function run(argv) {
         });
         const ir = buildIr(dis, makeResolver(dis.rawMap), { entryFile: path.resolve(base, config.source), defines, profile: compile.profile, extraArgs: compile.dxcArgs || [], dxcExe, dxcVersion });
         // Source paths relative to the config file, so outputs do not depend on where the tree is checked out.
-        const rel = (p) => (typeof p === 'string' && path.isAbsolute(p) ? path.relative(base, p).split(path.sep).join('/') : p);
-        ir.generatorDetail.entryFile = rel(ir.generatorDetail.entryFile);
-        for (const n of ir.nodes) n.sourceFile = rel(n.sourceFile);
-        for (const t of Object.values(ir.recordTypes || {})) t.file = rel(t.file);
+        relativizeIrPaths(ir, base);
         const file = path.join(outDir, `compile-${irByKey.size + 1}.ir.json`);
         writeIrFile(file, ir);
         irByKey.set(key, ir);

@@ -152,7 +152,17 @@ buffer element types and nested structs, with composition arrows for nested stru
 - fields that **affect an output's allocation count**, fields that **decide control flow** in a node;
 - fields **written but never read** by any node, and implicit **padding**.
 
-`--style yaml` renders the same content as a PlantUML YAML diagram.
+![Record layouts of the consume dispatch in examples/multi-dispatch](examples/multi-dispatch/gen/02-consume-color.records.png)
+
+*`examples/multi-dispatch`, dispatch `consume-color`. Read a row as `size offset type name`: `FanOutRecord` is 20
+bytes, its first field `DispatchGrid` is a 12-byte `uint3` at offset 0 and is the record's SV_DispatchGrid - taken
+from the node metadata, with its value computed from the `counters` buffer. `ItemRef.index` (4 bytes at offset 0)
+indexes `items[]` and `results[]`; `FanOutRecord.count` affects how many records `FanOutNode` emits to `ShadeNode`.
+`DrawEntryRecord` is the entry record the CPU passes to `DispatchGraph`; `Item` is the element type of the `items`
+buffer. Every highlight is marked `(DXIL)`: inferred from the compiled shader.*
+
+`--style yaml` renders the same content as a PlantUML YAML diagram. For a single IR, run
+`build-records graph.ir.json records.puml`; the pipeline writes one records diagram per dispatch.
 
 ### Line styles
 
@@ -213,6 +223,7 @@ Run `<command> --help` for the exact, current list.
 | `--dxc <path>` | - | Use this `dxc` binary (on Linux a native build works directly; `dxc.exe` runs natively on Windows, via `wine` elsewhere). |
 | `--dxc-version <mesh\|stable\|experimental\|version>` | auto | Use a `dxc` installed by `setup-dxil`. Auto-detection scans only the entry file for `NodeLaunch("mesh")`. |
 | `--keep-intermediate` | off | Keep the `.dxil` and `-Fc` disassembly in the working directory. |
+| `--paths-relative-to <dir>` | - | Write source paths in the IR relative to `<dir>` (for committing IRs). |
 | `--from-disassembly <file.dis.ll>` | - | Parse an existing disassembly instead of compiling (see below). |
 
 **`build-puml [inJsonFile] [outPUml]`**:
@@ -296,11 +307,12 @@ Three minimal, runnable work graphs live under [`examples/`](examples/), each wi
 tool's output) and a `README.md` with the exact commands to reproduce `gen/`:
 
 - [`examples/simple-pipeline/`](examples/simple-pipeline/) - the three main launch modes chained together
-  (`broadcasting` → `thread` → `coalescing`); both parsers side by side.
+  (`broadcasting` → `thread` → `coalescing`); both parsers side by side, plus its record layouts.
 - [`examples/mesh-culling/`](examples/mesh-culling/) - a `mesh`-launch node with a runtime dispatch grid, reading a
-  global `StructuredBuffer`; both parsers side by side.
+  global `StructuredBuffer`; both parsers side by side, plus its record layouts (an SV_DispatchGrid record).
 - [`examples/multi-dispatch/`](examples/multi-dispatch/) - the `pipeline`: a producer dispatch filling UAVs and two
-  consumer dispatches of the same entry, with entry records and a per-dispatch `#define` (the image at the top).
+  consumer dispatches of the same entry, with entry records and a per-dispatch `#define` (the image at the top),
+  and a records diagram per dispatch (the image under "Record layouts").
 
 ## Rendering notes
 

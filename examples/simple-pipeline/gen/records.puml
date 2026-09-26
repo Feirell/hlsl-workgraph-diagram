@@ -1,0 +1,43 @@
+@startuml RecordLayouts
+hide empty methods
+hide circle
+skinparam classAttributeIconSize 0
+skinparam classFontStyle bold
+skinparam classAttributeFontName monospaced
+skinparam classAttributeFontSize 11
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #5D6D7E
+  BackgroundColor<<cpu-entry-record>> #E8F8F5
+  BackgroundColor<<node-record>> #EBF5FB
+  BackgroundColor<<buffer-element>> #FEF9E7
+  BackgroundColor<<nested>> #F4F6F6
+}
+skinparam packageStyle rectangle
+
+package "Node records (graph edges)" {
+  class ResultRecord <<node-record>> {
+    {field} <size:10><color:#5D6D7E>4 B</color></size>
+    ==
+    {field} <color:#7F8C8D> size offset  type           name</color>
+    {field}     4      0  float          value
+    ..
+    {field} <size:10><i>produced by GenerateNode</i></size>
+    {field} <size:10><i>consumed by CollectNode</i></size>
+  }
+  class WorkItemRecord <<node-record>> {
+    {field} <size:10><color:#5D6D7E>4 B</color></size>
+    ==
+    {field} <color:#7F8C8D> size offset  type           name</color>
+    {field}     4      0  uint           itemId
+    ..
+    {field} <size:10><i>produced by EntryNode</i></size>
+    {field} <size:10><i>consumed by GenerateNode</i></size>
+  }
+}
+
+legend right
+  columns: size and offset in bytes, type, name; layout from DXIL debug info (-Zi), SV_DispatchGrid from DXIL node metadata;
+  (DXIL) = inferred from the compiled shaders
+endlegend
+@enduml
