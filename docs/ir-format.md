@@ -81,6 +81,12 @@ way).
   `fields` maps a constant element offset onto the element struct's layout (`(dynamic offset)` when not constant);
   `constIndices` lists constant element indices for scalar-element buffers (e.g. counter slots).
 
+Also `outputAllocationKinds` (`per-thread`/`per-group` and the count, `x(dynamic)` if computed),
+`controlSources` (sources of `br`/`switch` conditions - what decides the node's control flow), and `barriers`
+(`dx.op.barrier` mode bits, or SM 6.8 memory-type/semantic flags). Globals carry `globallyCoherent`,
+`hasCounter`, `rasterizerOrdered` for UAVs; per-field dataflow also has `controls` (nodes whose branches
+depend on the field). `dim:<resource>` is a source from `GetDimensions`.
+
 Source strings: `in:<Type>.<field>`, `buf:<resource>.<field>` / `buf:<resource>[i]`, `sv:<SV_name>.<axis>`,
 `const:<value>`, `local` (only visible through local/groupshared memory). Data dependence only: a value that
 influences another solely through a branch condition is not a source.

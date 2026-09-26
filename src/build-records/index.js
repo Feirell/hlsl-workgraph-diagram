@@ -35,7 +35,8 @@ const KINDS = {
     semantic: { colour: '#C0392B', back: '#FADBD8', label: 'system value (SV_DispatchGrid): sizes the consumer\'s dispatch grid' },
     index: { colour: '#1F618D', back: '#D6EAF8', label: 'indexes a buffer (DXIL dataflow)' },
     sizing: { colour: '#6C3483', back: '#EBDEF0', label: 'affects an output allocation count (DXIL dataflow)' },
-    control: { colour: '#9A6700', back: '#FCF3CF', label: 'annotation-only role (supplied by --annotations)' },
+    control: { colour: '#9A6700', back: '#FCF3CF', label: 'decides control flow in a node (DXIL dataflow)' },
+    annotation: { colour: '#117A65', back: '#D1F2EB', label: 'role supplied only by --annotations' },
     unread: { colour: '#95A5A6', back: '#FFFFFF', label: 'written but never read by any node (DXIL dataflow)' },
     padding: { colour: '#7F8C8D', back: '#EAEDED', label: 'implicit padding (no field)' },
 };
@@ -100,13 +101,15 @@ function rowsOf(typeName, t, annotations) {
         const d = f.dataflow || null;
         const inferredIndex = d ? [...new Set(d.indexes.map((i) => i.resource))] : [];
         const sizes = d ? [...new Set(d.sizesOutputs.map((x) => x.output))] : [];
+        const controls = d ? d.controls || [] : [];
         let kind = null;
         if (f.semantic) kind = 'semantic';
         else if (inferredIndex.length) kind = 'index';
         else if (sizes.length) kind = 'sizing';
-        else if (a) kind = a.kind === 'index' ? 'index' : 'control';
+        else if (controls.length) kind = 'control';
+        else if (a) kind = a.kind === 'index' ? 'index' : 'annotation';
         else if (d && d.writtenBy.length && !d.readBy.length) kind = 'unread';
-        rows.push({ ...f, annotation: a, kind, inferredIndex, sizes });
+        rows.push({ ...f, annotation: a, kind, inferredIndex, sizes, controls });
         cursor = Math.max(cursor, f.offsetBytes + f.sizeBytes);
     }
     if (t.sizeBytes > cursor) pad(cursor, t.sizeBytes - cursor);
@@ -142,6 +145,7 @@ function annotationText(r) {
     if (r.semantic) parts.push(r.semantic === 'SV_DispatchGrid' ? 'SV_DispatchGrid (DXIL metadata)' : `${r.semantic} (source)`);
     if (r.inferredIndex && r.inferredIndex.length) parts.push(`→ ${r.inferredIndex.map((x) => `${x}[]`).join(', ')} (DXIL)`);
     if (r.sizes && r.sizes.length) parts.push(`count of → ${capList(r.sizes)} (DXIL)`);
+    if (r.controls && r.controls.length && !r.inferredIndex.length && !r.sizes.length) parts.push(`branches in ${capList(r.controls)} (DXIL)`);
     if (r.dataflow && r.semantic && r.dataflow.sources.length) parts.push(`← ${capList(foldSources(r.dataflow.sources))}`);
     if (r.kind === 'unread') parts.push('never read by a node');
     if (r.annotation) {

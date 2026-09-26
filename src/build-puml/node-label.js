@@ -188,15 +188,16 @@ function buildGlobalsUsedLines(n, globalsByName, theme, globalListEnabled) {
     return [smallItalicLine('Globals used:'), ...valueLines].join('\\n');
 }
 
-// With per-resource access from the DXIL (parse-dxil's globalAccess), globals split into what the
-// node reads and what it writes; a read+write resource appears in both. Atomics count as writes and
-// say so. --global-fields appends the element fields touched (from dataflow), folded to top level.
+// With per-resource access from the DXIL (parse-dxil's globalAccess): "Globals read" lists what the node
+// ONLY reads; "Globals written" lists everything it writes, tagged when it also reads or writes atomically.
+// --global-fields appends the element fields touched (from dataflow), folded to top level.
 function buildGlobalsAccessLines(n, globalsByName, theme, opts, which) {
     if (!opts.globalListEnabled || !n.globalAccess) return null;
     const res = (n.dataflow && n.dataflow.resources) || {};
+    const writes = (parts) => parts.includes('write') || parts.includes('atomic');
     const entries = Object.entries(n.globalAccess).filter(([, label]) => {
         const parts = label.split('+');
-        return which === 'read' ? parts.includes('read') || (parts.length === 1 && parts[0] === 'query') : parts.includes('write') || parts.includes('atomic');
+        return which === 'read' ? !writes(parts) : writes(parts);
     });
     if (!entries.length) return null;
     const lines = entries.map(([name, label]) => {
@@ -205,12 +206,18 @@ function buildGlobalsAccessLines(n, globalsByName, theme, opts, which) {
         const regText = g.regType != null && g.regSlot != null ? `${g.regType}${g.regSlot}${g.space ? `, space${g.space}` : ''}` : '?';
         const typeSpan = g.valueType ? ` <color:${theme.greyOne}><<${pumlEscape(g.valueType)}>></color>` : '';
         const parts = label.split('+');
-        let note = '';
-        if (which === 'read' && parts.length === 1 && parts[0] === 'query') note = ' (size only)';
-        if (which === 'write' && parts.includes('atomic')) {
-            const ops = (res[name] && res[name].atomicOps) || [];
-            note = ` (atomic${ops.length ? ` ${ops.join('/')}` : ''})`;
+        const tags = [];
+        if (which === 'read' && !parts.includes('read') && parts.includes('query')) tags.push('size only');
+        if (which === 'write') {
+            if (parts.includes('read')) tags.push('read');
+            if (parts.includes('write')) tags.push('write');
+            if (parts.includes('atomic')) {
+                const ops = (res[name] && res[name].atomicOps) || [];
+                tags.push(`atomic${ops.length ? ` ${ops.join('/')}` : ''}`);
+            }
+            if (g.globallyCoherent) tags.push('globallycoherent');
         }
+        const note = tags.length && !(which === 'write' && tags.length === 1 && tags[0] === 'write') ? ` (${tags.join(' + ')})` : '';
         let fields = '';
         if (opts.globalFields && res[name]) {
             const kinds = which === 'read' ? ['read'] : ['write', 'atomic'];
@@ -221,7 +228,15 @@ function buildGlobalsAccessLines(n, globalsByName, theme, opts, which) {
         }
         return smallItalicLine(`  ${identSpan} (${regText})${typeSpan}${pumlEscape(note)}${fields}`);
     });
-    return [smallItalicLine(which === 'read' ? 'Globals read:' : 'Globals written:'), ...lines].join('\\n');
+    return [smallItalicLine(which === 'read' ? 'Globals read only:' : 'Globals written:'), ...lines].join('\\n');
+}
+
+// Barriers the compiled function executes (DXIL), e.g. GroupMemoryBarrierWithGroupSync.
+function buildBarrierLine(n, opts) {
+    const b = n.dataflow && n.dataflow.barriers;
+    if (!opts.globalListEnabled || !b || !b.length) return null;
+    const text = b.map((x) => [x.resource, ...(x.flags || []), ...(x.memory || []), ...(x.semantics || [])].filter(Boolean).join('+')).join('; ');
+    return smallItalicLine(`Barriers: ${pumlEscape(text)}`);
 }
 
 function buildInputRecordLine(n, theme, shortRecordInCount, recordInNamesEnabled) {
@@ -291,6 +306,7 @@ function buildLabel(n, grid, theme, globalsByName, opts) {
         buildInputRecordLine(n, theme, opts.shortRecordInCount, opts.recordInNamesEnabled),
         buildGlobalsAccessLines(n, globalsByName, theme, opts, 'read'),
         buildGlobalsAccessLines(n, globalsByName, theme, opts, 'write'),
+        buildBarrierLine(n, opts),
         buildOutputRecordsLines(n, theme, opts.shortRecordOutCount, opts.recordOutNamesEnabled),
     ]
         .filter(Boolean)

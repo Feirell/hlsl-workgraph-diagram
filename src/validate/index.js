@@ -151,23 +151,43 @@ function checkRecordTypes(ir, annotations, report) {
     }
 }
 
-// Per edge: every field the consumer reads must be written by every producer on that edge - a field
-// read but never written is the allocate-without-write class of bug (undefined record contents).
-// Conservative in the other direction: a write on any path counts as written.
+// Per edge, at element/component level: every record field path the consumer loads must be stored by the
+// producer on SOME path. Not path-sensitive - a field written on one branch and left unwritten on another
+// passes - so this finds fields no path writes, not every allocate-without-write bug.
+const segs = (p) => p.replace(/\[/g, '.[').split('.').filter(Boolean);
+const segMatch = (a, b) => a === b || a === '[*]' || b === '[*]';
+function coverage(readPath, writtenPaths) {
+    const r = segs(readPath);
+    let partial = false;
+    for (const w of writtenPaths.map(segs)) {
+        const n = Math.min(r.length, w.length);
+        let ok = true;
+        for (let i = 0; i < n; i++) if (!segMatch(r[i], w[i])) { ok = false; break; }
+        if (ok && w.length <= r.length) return 'full'; // the write covers the read (same leaf or an enclosing field)
+        if (ok || r[0] === w[0]) partial = true;       // only part of what is read was written
+    }
+    return partial ? 'partial' : 'none';
+}
+
 function checkFieldDataflow(ir, report) {
     if (!ir.nodes.some((n) => n.dataflow)) return;
     const edges = buildEdges(ir.nodes);
     for (const consumer of ir.nodes) {
         const input = consumer.inputs[0];
         if (!input || !input.recordType || !consumer.dataflow) continue;
-        const read = new Set((consumer.dataflow.inputFieldsRead[input.recordType] || []).map((f) => f.split(/[.[]/)[0]));
+        const read = consumer.dataflow.inputFieldsRead[input.recordType] || [];
         for (const e of edges.filter((x) => x.to === consumer.id)) {
             const producer = ir.nodes.find((n) => n.id === e.from);
             const out = producer.dataflow && producer.dataflow.outputFieldsWritten[e.outputIndex];
-            const written = new Set(Object.keys((out && out.fields) || {}).map((f) => f.split(/[.[]/)[0]));
-            const missing = [...read].filter((f) => !written.has(f));
-            if (!missing.length) report('PASS', 'field-initialised', `${e.from} -> ${consumer.id}: every field ${consumer.id} reads is written (${[...read].join(', ') || 'none read'})`);
-            else report(e.dead ? 'INFO' : 'WARN', 'field-initialised', `${e.from} -> ${consumer.id}: reads ${missing.join(', ')} of ${input.recordType}, never written by ${e.from}${e.dead ? ' (edge is statically dead)' : ''}`);
+            const written = Object.keys((out && out.fields) || {});
+            const none = read.filter((p) => coverage(p, written) === 'none');
+            const partial = read.filter((p) => coverage(p, written) === 'partial');
+            const status = e.dead ? 'INFO' : 'WARN';
+            if (!none.length && !partial.length) {
+                report('PASS', 'field-written', `${e.from} -> ${consumer.id}: every ${input.recordType} element ${consumer.id} reads is stored on some path (${read.length} read)`);
+            }
+            if (none.length) report(status, 'field-written', `${e.from} -> ${consumer.id}: ${consumer.id} reads ${fold(none)} of ${input.recordType}; no path in ${e.from} stores it${e.dead ? ' (edge is statically dead)' : ''}`);
+            if (partial.length) report(status, 'field-written', `${e.from} -> ${consumer.id}: ${consumer.id} reads ${fold(partial)}; ${e.from} stores only part of it${e.dead ? ' (edge is statically dead)' : ''}`);
         }
     }
     for (const [type, t] of Object.entries(ir.recordTypes || {})) {
@@ -179,6 +199,8 @@ function checkFieldDataflow(ir, report) {
         }
     }
 }
+
+const fold = (paths) => [...new Set(paths.map((p) => p.replace(/\.[xyzw]$/, '')))].join(', ');
 
 function checkNodeLimits(nodes, report) {
     for (const n of nodes) {

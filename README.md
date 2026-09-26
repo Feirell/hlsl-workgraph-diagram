@@ -202,8 +202,8 @@ hlsl-workgraph-diagram build-puml graph.ir.json frame.puml --dispatches plan.jso
 hlsl-workgraph-diagram validate graph.ir.json --dispatches plan.json --inventory startup-log.txt
 ```
 
-Node boxes list **Globals read** and **Globals written** separately (atomics marked with their op) between
-`Record in` and `Record out`; `--global-fields` adds the element fields touched. `--edge-record-size` adds each
+Node boxes list **Globals read only** and **Globals written** (tagged `read`, `atomic <op>`, `globallycoherent`
+where they apply) between `Record in` and `Record out`, plus any **Barriers** the node executes; `--global-fields` adds the element fields touched. `--edge-record-size` adds each
 record's byte size to the edge notes.
 
 `validate` checks the spec's node output limits (which DXC does not check; only `CreateStateObject` does),
@@ -230,8 +230,9 @@ output's allocation count**, fields **written but never read** by any node, impl
 "evidence": "file:line"}}`; keys starting with `_` are comments). `--columns <n>` sets boxes per row.
 Record flags from the node-IO metadata (RW input, `NodeTrackRWInputSharing`, `globallycoherent`) are shown
 per type. `validate` cross-checks debug-info size against the DXIL record size and the source `: SV_DispatchGrid`
-against the metadata; per edge, that every field the consumer reads is written by the producer (the
-allocate-without-write bug class); lists fields never read; and checks every annotation against the IR.
+against the metadata; per edge, that every record element the consumer reads is stored by the producer on
+at least one path (element/component level; NOT path-sensitive, so a field left unwritten on only one branch
+is not caught); lists fields never read; and checks every annotation against the IR.
 
 **What needs `-Zi`:** field names, offsets by name, nested type names and comments come from debug info and
 the embedded source, which `parse-dxil` always requests. Without them only the record size, alignment, the

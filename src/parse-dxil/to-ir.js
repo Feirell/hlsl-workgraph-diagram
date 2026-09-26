@@ -80,6 +80,9 @@ function resourceToIr(r) {
         regType: r.regType,
         regSlot: r.regSlot,
         space: r.space,
+        globallyCoherent: r.globallyCoherent ?? null,
+        hasCounter: r.hasCounter ?? null,
+        rasterizerOrdered: r.rasterizerOrdered ?? null,
         file: null, // not recoverable from !dx.resources - would need a debug-info cross-reference not yet implemented
     };
 }
@@ -252,7 +255,7 @@ function buildRecordTypes(nodes, globals, dis, resolveId, sourceFiles) {
 function attachFieldDataflow(types, nodes, globals) {
     const top = (f) => f.replace(/\[[^\]]*\]/g, '').replace(/\.[xyzw]$/, '').split('.')[0];
     const fieldOf = (type, f) => (types[type] ? types[type].fields.find((x) => x.name === top(f)) : null);
-    const newDf = () => ({ readBy: [], writtenBy: [], sources: [], indexes: [], sizesOutputs: [], flowsTo: [] });
+    const newDf = () => ({ readBy: [], writtenBy: [], sources: [], indexes: [], sizesOutputs: [], flowsTo: [], controls: [] });
     // Every struct level along a field path ("metaData.vertex.offset" in FloorRecord also touches
     // BuildingMetaData.vertex and ArrayPointer.offset), so nested types get their own dataflow.
     const dfAll = (type, path) => {
@@ -301,6 +304,11 @@ function attachFieldDataflow(types, nodes, globals) {
                 const xs = from ? (from.type ? dfAll(from.type, from.field) : dfAll(elemType[from.resource], from.field)) : [];
                 for (const x of xs) push(x.sizesOutputs, { node: n.id, output: n.outputs[o] && n.outputs[o].linkedNodeID ? n.outputs[o].linkedNodeID.name : o });
             }
+        }
+        for (const s of d.controlSources || []) {
+            const from = parseSource(s);
+            const xs = from ? (from.type ? dfAll(from.type, from.field) : dfAll(elemType[from.resource], from.field)) : [];
+            for (const x of xs) push(x.controls, n.id);
         }
         for (const [res, e] of Object.entries(d.resources)) {
             for (const [f, kinds] of Object.entries(e.fields)) {

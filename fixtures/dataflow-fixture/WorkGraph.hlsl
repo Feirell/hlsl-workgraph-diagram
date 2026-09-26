@@ -5,8 +5,9 @@
 //  - Mid.count <- const:5 ; allocation count of Leaf output <- in:Entry.n
 //  - Mid.missing: read by Leaf, never written by Head -> field-initialised WARN
 //  - Mid.spare: written by Head, never read            -> field-unread INFO
+//  - Mid.arr: Head stores arr[0] only, Leaf reads arr[2] -> field-written WARN (partial)
 struct EntryRec { uint base; uint n; };
-struct Mid { uint idx; uint count; uint missing; uint spare; };
+struct Mid { uint idx; uint count; uint missing; uint spare; uint arr[4]; };
 RWStructuredBuffer<uint> data : register(u0);
 RWStructuredBuffer<uint> sink : register(u1);
 
@@ -25,6 +26,7 @@ void Head(uint tid : SV_DispatchThreadID,
         r.Get().idx = input.Get().base + tid;
         r.Get().count = 5;
         r.Get().spare = 7;
+        r.Get().arr[0] = 3;
     }
     r.OutputComplete();
 }
@@ -33,5 +35,5 @@ void Head(uint tid : SV_DispatchThreadID,
 [NodeLaunch("thread")]
 void Leaf(ThreadNodeInputRecord<Mid> m)
 {
-    sink[m.Get().count] = data[m.Get().idx] + m.Get().missing;
+    sink[m.Get().count] = data[m.Get().idx] + m.Get().missing + m.Get().arr[2];
 }

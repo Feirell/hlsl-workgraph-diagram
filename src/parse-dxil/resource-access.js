@@ -54,8 +54,9 @@ const OP_ACCESS = {
 const HANDLE_PLUMBING = new Set(['createHandleForLib', 'annotateHandle', 'createHandle', 'createHandleFromBinding', 'createHandleFromHeap']);
 
 const DEF_RE = /^\s*(%[\w.$-]+)\s*=\s*(.*)$/;
-const HANDLE_REF_RE = /%dx\.types\.Handle\s+(%[\w.$-]+)/g;
-const OP_RE = /@dx\.op\.([A-Za-z0-9]+)/;
+const HANDLE_REF_RE = /(?:%dx\.types\.Handle|%"hostlayout\.[^"]*")\s+(%[\w.$-]+)/g;
+// Overloads on a named type are quoted: @"dx.op.createHandleForLib.hostlayout.class..."(...).
+const OP_RE = /@"?dx\.op\.([A-Za-z0-9]+)/;
 
 // resources: getResources() output ({ globalVariable, name, ... }).
 // Returns { [resourceName]: { read, write, atomic, query, other: [opName] } }
@@ -87,7 +88,8 @@ function findGlobalAccess(body, resources) {
         const rhs = def ? def[2] : code;
 
         // A handle-typed definition: record which resources it stands for.
-        if (def && /^(load|call|phi|select)\s+%dx\.types\.Handle\b/.test(rhs)) {
+        // A matrix-bearing buffer is loaded as its %"hostlayout.class..." type, not as %dx.types.Handle.
+        if (def && /^(load|call|phi|select)\s+(%dx\.types\.Handle\b|%"hostlayout\.)/.test(rhs)) {
             const set = referencedGlobals(rhs);
             for (const m of rhs.matchAll(/@"([^"]+)"/g)) {
                 if (byMangled.has(m[1])) set.add(byMangled.get(m[1]));

@@ -411,6 +411,10 @@ function getResources(resolveId, named, disText) {
                 space: typeof space === 'number' ? space : null,
                 kind,
                 valueType: disText && globalRef ? extractResourceValueType(disText, globalRef.$func) : null,
+                // UAV record: [..., kind, globallyCoherent, hasCounter, rasterizerOrdered, extended].
+                globallyCoherent: resourceClass === 'UAV' ? entry[7] === true || entry[7] === 1 : null,
+                hasCounter: resourceClass === 'UAV' ? entry[8] === true || entry[8] === 1 : null,
+                rasterizerOrdered: resourceClass === 'UAV' ? entry[9] === true || entry[9] === 1 : null,
                 raw: entry,
             });
         }

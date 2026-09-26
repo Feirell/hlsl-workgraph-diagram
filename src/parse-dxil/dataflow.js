@@ -34,6 +34,11 @@ const BUFFER_OPS = {
     atomicCompareExchange: { kind: 'atomic', index: 1, offset: 2, values: [5] },
 };
 const ATOMIC_OPS = ['add', 'and', 'or', 'xor', 'imin', 'imax', 'umin', 'umax', 'exchange'];
+// dx.op.barrier(80, mode): DXIL BarrierMode bits. SM 6.8 barriers: memory-type and semantic flags.
+const BARRIER_MODE = { 1: 'SyncThreadGroup', 2: 'UAVFenceGlobal', 4: 'UAVFenceThreadGroup', 8: 'TGSMFence' };
+const MEMORY_TYPE = { 1: 'UAV', 2: 'GroupShared', 4: 'NodeInput', 8: 'NodeOutput' };
+const SEMANTIC = { 1: 'GroupSync', 2: 'GroupScope', 4: 'DeviceScope' };
+const bits = (v, table) => Object.entries(table).filter(([b]) => Number(v) & Number(b)).map(([, n]) => n);
 
 // Top-level comma split of a call's argument list, e.g. "i32 139, %dx.types.Handle %5, i32 %6".
 function splitArgs(s) {
@@ -111,10 +116,11 @@ function analyseFunction(body, ctx) {
     const recHandle = new Map(); // record handle -> { kind: 'in', index } | { kind: 'out', output }
     const nodeHandleOut = new Map(); // node output handle -> output index
     const mem = new Map(); // memory object -> Set(source)
-    const result = { inputs: {}, outputs: {}, resources: {}, allocations: {} };
+    const result = { inputs: {}, outputs: {}, resources: {}, allocations: {}, allocationKinds: {}, controls: new Set(), barriers: [] };
+    const seenBarrier = new Set();
     const add = (set, items) => { let c = false; for (const x of items) if (!set.has(x)) { set.add(x); c = true; } return c; };
     const sourcesOf = (v) => (isConst(v) ? new Set([`const:${v}`]) : src.get(v) || new Set());
-    const resEntry = (r) => (result.resources[r] = result.resources[r] || { read: false, write: false, atomic: false, fields: {}, constIndices: {}, indexedBy: {}, valuesFrom: [], atomicOps: [] });
+    const resEntry = (r) => (result.resources[r] = result.resources[r] || { read: false, write: false, atomic: false, query: false, fields: {}, constIndices: {}, indexedBy: {}, valuesFrom: [], atomicOps: [] });
     const bump = (obj, key, kind) => { (obj[key] = obj[key] || new Set()).add(kind); };
 
     let changed = true;
@@ -130,7 +136,7 @@ function analyseFunction(body, ctx) {
                 if (add(src.get(lhs), items)) changed = true;
             };
             let m;
-            if ((m = rhs.match(/@dx\.op\.(\w+?)(?:\.[\w.]+)?\((.*)\)\s*$/))) {
+            if ((m = rhs.match(/@"?dx\.op\.(\w+?)(?:\.[^("]+)?"?\((.*)\)\s*$/))) {
                 const op = m[1];
                 const args = splitArgs(m[2]);
                 if (SV_OPS[Number(argValue(args[0]))] && /^(threadId|groupId|threadIdInGroup|flattenedThreadIdInGroup)$/.test(op)) {
@@ -148,12 +154,26 @@ function analyseFunction(body, ctx) {
                         recHandle.set(lhs, { kind: 'out', output: out });
                         const a = (result.allocations[out] = result.allocations[out] || new Set());
                         add(a, sourcesOf(argValue(args[2])));
+                        const kind = argValue(args[3]) === 'true' ? 'per-thread' : 'per-group';
+                        const k = (result.allocationKinds[out] = result.allocationKinds[out] || new Set());
+                        k.add(isConst(argValue(args[2])) ? `${kind} x${argValue(args[2])}` : `${kind} x(dynamic)`);
                     }
                 } else if (op === 'annotateNodeRecordHandle' && recHandle.has(argValue(args[1]))) {
                     recHandle.set(lhs, recHandle.get(argValue(args[1])));
                 } else if (op === 'getNodeRecordPtr' && recHandle.has(argValue(args[1]))) {
                     const h = recHandle.get(argValue(args[1]));
                     ptr.set(lhs, h.kind === 'in' ? { kind: 'in', type: inputTypes[h.index] } : { kind: 'out', type: outputTypes[h.output], output: h.output });
+                } else if (/^barrier/.test(op)) {
+                    let b;
+                    if (op === 'barrier') b = { op, flags: bits(argValue(args[1]), BARRIER_MODE) };
+                    else if (op === 'barrierByMemoryType') b = { op, memory: bits(argValue(args[1]), MEMORY_TYPE), semantics: bits(argValue(args[2]), SEMANTIC) };
+                    else b = { op, resource: handleGlobal.get(argValue(args[1])) || null, semantics: bits(argValue(args[2]), SEMANTIC) };
+                    const key = JSON.stringify(b);
+                    if (!seenBarrier.has(key)) { seenBarrier.add(key); result.barriers.push(b); }
+                } else if (op === 'getDimensions' && handleGlobal.has(argValue(args[1]))) {
+                    const res = handleGlobal.get(argValue(args[1]));
+                    resEntry(res).query = true;
+                    setSrc([`dim:${res}`]);
                 } else if (BUFFER_OPS[op]) {
                     const spec = BUFFER_OPS[op];
                     const res = handleGlobal.get(argValue(args[1])); // every buffer op takes its handle as argument 1
@@ -183,6 +203,10 @@ function analyseFunction(body, ctx) {
                 } else {
                     setSrc([...new Set(refsIn(m[2]).flatMap((r) => [...(src.get(r) || [])]))]);
                 }
+                continue;
+            }
+            if ((m = line.match(/^(?:br i1|switch i32) (%[\w.$"\\-]+)/))) {
+                if (add(result.controls, sourcesOf(m[1]))) changed = true;
                 continue;
             }
             if ((m = rhs.match(/^getelementptr (?:inbounds )?(.*)$/))) {
@@ -249,9 +273,12 @@ function analyseFunction(body, ctx) {
             Object.entries(result.outputs).map(([o, fields]) => [o, { target: outputTargets[o], recordType: outputTypes[o], fields: Object.fromEntries(Object.entries(fields).map(([f, s]) => [f, clean(s)])) }])
         ),
         outputAllocationSources: Object.fromEntries(Object.entries(result.allocations).map(([o, s]) => [o, clean(s)])),
+        outputAllocationKinds: Object.fromEntries(Object.entries(result.allocationKinds).map(([o, s]) => [o, [...s].sort()])),
+        controlSources: clean(result.controls).filter((x) => x !== 'local' && !x.startsWith('const:')),
+        barriers: result.barriers,
         resources: Object.fromEntries(
             Object.entries(result.resources).map(([r, e]) => [r, {
-                access: ['read', 'write', 'atomic'].filter((k) => e[k]),
+                access: ['read', 'write', 'atomic', 'query'].filter((k) => e[k]),
                 fields: setMap(e.fields),
                 constIndices: setMap(e.constIndices),
                 indexedBy: setMap(e.indexedBy),
@@ -269,7 +296,7 @@ function handleMap(body, resources) {
     const map = new Map();
     for (let pass = 0; pass < 3; pass++) {
         for (const line of body.split('\n')) {
-            const m = line.match(/^\s*(%[\w.$"\\-]+)\s*=\s*(load|call|phi|select)\s+%dx\.types\.Handle\b(.*)$/);
+            const m = line.match(/^\s*(%[\w.$"\\-]+)\s*=\s*(load|call|phi|select)\s+(?:%dx\.types\.Handle\b|%"hostlayout\.[^"]*")(.*)$/);
             if (!m) continue;
             const g = m[3].match(/@"([^"]+)"/);
             if (g && byMangled.has(g[1])) { map.set(m[1], byMangled.get(g[1])); continue; }
