@@ -223,8 +223,11 @@ function renderClass(types, opts) {
     L.push('', 'legend right');
     const used = new Set(types.flatMap((t) => t.rows.map((r) => r.kind)));
     for (const [, k] of Object.entries(KINDS).filter(([name]) => used.has(name))) L.push(`  <back:${k.back}><color:${k.colour}><b>  field  </b></color></back> ${pumlEscape(k.label)}`);
-    L.push('  columns: size and offset in bytes, type, name; layout from DXIL debug info (-Zi), SV_DispatchGrid from DXIL node metadata;',
-        '  (DXIL) = inferred from the compiled shaders, (annotation) = supplied by an --annotations file', 'endlegend', '@enduml');
+    L.push('  columns: size and offset in bytes, type, name; layout from DXIL debug info (-Zi), SV_DispatchGrid from DXIL node metadata;');
+    L.push(types.some((t) => t.rows.some((r) => r.annotation))
+        ? '  (DXIL) = inferred from the compiled shaders, (annotation) = supplied by an --annotations file'
+        : '  (DXIL) = inferred from the compiled shaders');
+    L.push('endlegend', '@enduml');
     return L.join('\n');
 }
 
